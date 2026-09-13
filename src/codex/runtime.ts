@@ -75,6 +75,11 @@ export interface ResolveCodexRuntimeDeps {
    * newerAvailable discovery). Use for hot UI/status paths.
    */
   discoverAlternatives?: boolean;
+  /**
+   * When false, select a candidate without synchronously running `--version`.
+   * The caller must validate the selected command asynchronously.
+   */
+  probeVersion?: boolean;
 }
 
 export interface PersistedCodexRuntimeState {
@@ -316,7 +321,7 @@ export function clearPersistedCodexRuntime(deps: ResolveCodexRuntimeDeps = {}): 
 function probeVersion(
   command: string,
   deps: ResolveCodexRuntimeDeps,
-): { ok: true; version: string } | { ok: false; reason: string } {
+): { ok: true; version: string | null } | { ok: false; reason: string } {
   const platform = deps.platform ?? process.platform;
   if (command.includes("/") || command.includes("\\") || /^[A-Za-z]:/.test(command)) {
     const exists = deps.existsSync ?? existsSync;
@@ -325,6 +330,7 @@ function probeVersion(
       return { ok: false, reason: "not a spawnable Codex launcher on this platform" };
     }
   }
+  if (deps.probeVersion === false) return { ok: true, version: null };
   const execFile = deps.execFileSync ?? (execFileSync as unknown as RuntimeExecFile);
   // Sandbox the probe's CODEX_HOME: a real Codex CLI creates state (tmp/, logs) under
   // CODEX_HOME even for `--version`, and the probe inherits the caller's env — so a
@@ -607,6 +613,7 @@ function resolveCacheKey(deps: ResolveCodexRuntimeDeps): string | null {
     path: env.PATH ?? "",
     platform: deps.platform ?? process.platform,
     discover: deps.discoverAlternatives !== false,
+    probeVersion: deps.probeVersion !== false,
     home: process.env.OPENCODEX_HOME ?? "",
     persisted: persistedRuntimeCacheStamp(deps),
   });

@@ -207,6 +207,25 @@ function readBasePrompt(codexHome: string): BasePromptText {
     };
   }
 
+  try {
+    const parsed = Bun.TOML.parse(configText);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("invalid TOML root");
+  } catch {
+    return {
+      text: null,
+      reason: "config-unreadable",
+      bytes: 0,
+      model: null,
+      modelSource: configPath,
+      sourcePath: null,
+      representation: "unavailable",
+      catalogVersion: null,
+      effectiveSourcePath: null,
+      effectiveSourceKind: "catalog-default",
+      effectiveTextAvailable: false,
+    };
+  }
+
   const model = readRootTomlString(configText, "model");
   const catalogPath = readCodexCatalogPathForHome(codexHome, configText);
   let catalog: ReturnType<typeof parseCatalogJson> = null;
@@ -688,9 +707,9 @@ export async function probePromptText(
   if (signal?.aborted) {
     return { ok: false, codexHome, layers: { "base-instructions": baseLayer }, base, detail: "prompt probe cancelled" };
   }
-  const resolved = probeCommandForTests ? null : resolveCodexRuntime({ discoverAlternatives: false });
+  const resolved = probeCommandForTests ? null : resolveCodexRuntime({ discoverAlternatives: false, probeVersion: false });
   const runtime = resolved?.runtime;
-  const binary = probeCommandForTests?.binary ?? (runtime?.version ? runtime.command : null);
+  const binary = probeCommandForTests?.binary ?? runtime?.command ?? null;
   if (!binary) {
     const failure = resolved
       ? classifyRuntimeFailure(resolved)
@@ -718,7 +737,9 @@ export async function probePromptText(
   };
   const outcome = await runSharedPromptProbe(command, signal);
   if (outcome.kind !== "output") {
-    const failure = outcome.kind === "failed" ? outcome.failure : undefined;
+    const failure = outcome.kind === "failed" && outcome.failure && runtime
+      ? { ...outcome.failure, detail: `${runtime.source}: ${outcome.failure.detail}` }
+      : outcome.kind === "failed" ? outcome.failure : undefined;
     return {
       ok: false,
       codexHome,

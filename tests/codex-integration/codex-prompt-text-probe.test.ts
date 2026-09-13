@@ -209,6 +209,39 @@ describe("base prompt source", () => {
     }
   });
 
+  test("rejects malformed TOML before extracting a model or catalog", async () => {
+    const home = root();
+    writeFileSync(join(home, "config.toml"), [
+      'model = "gpt-test"',
+      'model_catalog_json = "catalog.json"',
+      "broken = [",
+      "",
+    ].join("\n"));
+    writeFileSync(join(home, "catalog.json"), JSON.stringify({
+      models: [{ slug: "gpt-test", base_instructions: "Should not be shown." }],
+    }));
+    const previousHome = process.env.CODEX_HOME;
+    process.env.CODEX_HOME = home;
+    setPromptTextProbeCommandForTests({
+      binary: process.execPath,
+      args: ["-e", `process.stdout.write(${JSON.stringify(VALID_PROBE_OUTPUT)})`],
+    });
+    try {
+      const result = await probePromptText(2_000);
+      expect(result.base).toMatchObject({
+        text: null,
+        reason: "config-unreadable",
+        model: null,
+        representation: "unavailable",
+        effectiveTextAvailable: false,
+      });
+      expect(result.layers["base-instructions"]).toMatchObject({ text: null, reason: "unavailable" });
+    } finally {
+      if (previousHome === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = previousHome;
+    }
+  });
+
   test("reports an empty model instruction override as unavailable", async () => {
     const home = root();
     const overridePath = join(home, "empty.md");

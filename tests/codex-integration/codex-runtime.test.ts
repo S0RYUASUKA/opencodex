@@ -529,6 +529,24 @@ describe("resolveCodexRuntime", () => {
     expect(result.runtime.version).toBe("0.154.0-alpha.6.2");
   });
 
+  test("can select a runtime without synchronously probing its version", () => {
+    let probeCalls = 0;
+    const result = resolveCodexRuntime({
+      configDir: tempConfigDir(),
+      env: { CODEX_CLI_PATH: "C:\\codex\\codex.exe", PATH: "" },
+      platform: "win32",
+      existsSync: () => true,
+      execFileSync: () => {
+        probeCalls += 1;
+        return "codex-cli 0.154.0";
+      },
+      probeVersion: false,
+    });
+    expect(result.runtime.command).toBe("C:\\codex\\codex.exe");
+    expect(result.runtime.version).toBeNull();
+    expect(probeCalls).toBe(0);
+  });
+
   test("valid configured runtime beats shim and PATH", () => {
     const configDir = tempConfigDir();
     persistCodexRuntime({
