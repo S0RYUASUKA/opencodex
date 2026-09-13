@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { atomicWriteFile, getConfigDir } from "../config";
 import { codexExecInvocation, isSpawnableCodexCandidate } from "./exec-invocation";
@@ -407,28 +407,38 @@ function pathCandidates(deps: ResolveCodexRuntimeDeps): string[] {
   return [...new Set(out)];
 }
 
-/** Windows Codex installs use a changing directory name under this stable product root. */
+/** Codex installs that are not necessarily exposed through PATH. */
 function installedCodexCandidates(deps: ResolveCodexRuntimeDeps): string[] {
-  if ((deps.platform ?? process.platform) !== "win32") return [];
-  const localAppData = (deps.env ?? process.env).LOCALAPPDATA?.trim();
-  if (!localAppData) return [];
-  const root = join(localAppData, "OpenAI", "Codex", "bin");
-  try {
-    return readdirSync(root, { withFileTypes: true })
-      .filter(entry => entry.isDirectory())
-      .map(entry => {
-        const directory = join(root, entry.name);
-        try {
-          return { directory, name: entry.name, mtimeMs: statSync(directory).mtimeMs };
-        } catch {
-          return { directory, name: entry.name, mtimeMs: -Infinity };
-        }
-      })
-      .sort((a, b) => b.mtimeMs - a.mtimeMs || a.name.localeCompare(b.name))
-      .map(entry => join(entry.directory, "codex.exe"));
-  } catch {
-    return [];
+  const platform = deps.platform ?? process.platform;
+  const env = deps.env ?? process.env;
+  if (platform === "win32") {
+    const localAppData = env.LOCALAPPDATA?.trim();
+    if (!localAppData) return [];
+    const root = join(localAppData, "OpenAI", "Codex", "bin");
+    try {
+      return readdirSync(root, { withFileTypes: true })
+        .filter(entry => entry.isDirectory())
+        .map(entry => {
+          const directory = join(root, entry.name);
+          try {
+            return { directory, name: entry.name, mtimeMs: statSync(directory).mtimeMs };
+          } catch {
+            return { directory, name: entry.name, mtimeMs: -Infinity };
+          }
+        })
+        .sort((a, b) => b.mtimeMs - a.mtimeMs || a.name.localeCompare(b.name))
+        .map(entry => join(entry.directory, "codex.exe"));
+    } catch {
+      return [];
+    }
   }
+  const home = env.HOME?.trim() || env.USERPROFILE?.trim() || homedir();
+  return [
+    join(home, ".codex", "packages", "standalone", "current", "bin", "codex"),
+    join(home, ".local", "bin", "codex"),
+    "/usr/local/bin/codex",
+    "/opt/homebrew/bin/codex",
+  ];
 }
 
 interface RankedCandidate {

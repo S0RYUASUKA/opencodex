@@ -511,6 +511,24 @@ describe("resolveCodexRuntime", () => {
     expect(probed.slice(0, 2)).toEqual([newer, older]);
   });
 
+  test("restores the established Unix Codex install locations", () => {
+    const home = tempConfigDir();
+    const installed = join(home, ".codex", "packages", "standalone", "current", "bin", "codex");
+    const result = resolveCodexRuntime({
+      configDir: tempConfigDir(),
+      env: { HOME: home, PATH: NO_CODEX_PATH },
+      platform: "linux",
+      existsSync: path => String(path) === installed,
+      execFileSync: file => {
+        expect(String(file)).toBe(installed);
+        return "codex-cli 0.154.0-alpha.6.2";
+      },
+    });
+    expect(result.runtime.command).toBe(installed);
+    expect(result.runtime.source).toBe("installed");
+    expect(result.runtime.version).toBe("0.154.0-alpha.6.2");
+  });
+
   test("valid configured runtime beats shim and PATH", () => {
     const configDir = tempConfigDir();
     persistCodexRuntime({
