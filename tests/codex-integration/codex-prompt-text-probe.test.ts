@@ -420,6 +420,30 @@ describe("probe failure attribution", () => {
       }
     }
   });
+
+  test("keeps a malformed catalog row unavailable instead of throwing", async () => {
+    const home = root();
+    writeFileSync(join(home, "config.toml"), "model = \"gpt-test\"\nmodel_catalog_json = \"catalog.json\"\n");
+    writeFileSync(join(home, "catalog.json"), JSON.stringify({ models: [null] }), "utf8");
+    const previousHome = process.env.CODEX_HOME;
+    process.env.CODEX_HOME = home;
+    setPromptTextProbeCommandForTests({
+      binary: process.execPath,
+      args: ["-e", `process.stdout.write(${JSON.stringify(VALID_PROBE_OUTPUT)})`],
+    });
+    try {
+      const result = await probePromptText(2_000);
+      expect(result.base).toMatchObject({
+        text: null,
+        reason: "model-not-found",
+        sourcePath: join(home, "catalog.json"),
+        effectiveTextAvailable: false,
+      });
+    } finally {
+      if (previousHome === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = previousHome;
+    }
+  });
 });
 
 describe("prompt probe process lifecycle", () => {

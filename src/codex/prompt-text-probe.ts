@@ -18,7 +18,7 @@
  *   universal prompt.
  */
 import { spawn } from "node:child_process";
-import { closeSync, existsSync, fstatSync, openSync, readSync, statSync } from "node:fs";
+import { closeSync, constants, existsSync, fstatSync, openSync, readSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { expandUserPath } from "../config";
 import { parseCatalogJson, readCodexCatalogPathForHome, type RawEntry } from "./catalog/parsing";
@@ -158,7 +158,7 @@ const MAX_PROBE_OUTPUT_BYTES = 8 * 1024 * 1024;
 function readBoundedPromptSource(path: string): string {
   let descriptor: number | undefined;
   try {
-    descriptor = openSync(path, "r");
+    descriptor = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
     const metadata = fstatSync(descriptor);
     if (!metadata.isFile()) {
       const error = new Error("prompt source is not a regular file") as NodeJS.ErrnoException;
@@ -278,7 +278,10 @@ function readBasePrompt(codexHome: string): BasePromptText {
   }
 
   if (!catalog) return unavailable(catalogReason, catalogPath);
-  const entry = catalog.models?.find(candidate => candidate.slug === model || candidate.id === model) ?? null;
+  const entry = catalog.models?.find(candidate => (
+    candidate !== null && typeof candidate === "object" &&
+    (candidate.slug === model || candidate.id === model)
+  )) ?? null;
   if (!entry) return unavailable("model-not-found", catalogPath);
   const topLevel = entryText(entry, "base_instructions");
   const modelMessages = entry.model_messages;
@@ -401,7 +404,7 @@ function classifyRuntimeFailure(runtime: ReturnType<typeof resolveCodexRuntime>)
       ? "execution-failed"
       : "program-not-found";
   return executionFailure(
-    { binary: runtime.runtime.command, args: [], cwd: "", timeoutMs: 0, promptStateFingerprint: null },
+    { binary: representative?.command ?? runtime.runtime.command, args: [], cwd: "", timeoutMs: 0, promptStateFingerprint: null },
     detail,
     kind,
   );
