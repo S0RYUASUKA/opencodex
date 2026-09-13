@@ -444,6 +444,38 @@ describe("probe failure attribution", () => {
       else process.env.CODEX_HOME = previousHome;
     }
   });
+
+  test.skipIf(process.platform === "win32")("rejects a FIFO prompt source without blocking", async () => {
+    const home = root();
+    const fifo = join(home, "prompt.fifo");
+    const created = Bun.spawnSync(["mkfifo", fifo]);
+    expect(created.exitCode).toBe(0);
+    writeFileSync(join(home, "config.toml"), [
+      "model = \"gpt-test\"",
+      "model_catalog_json = \"catalog.json\"",
+      "model_instructions_file = \"prompt.fifo\"",
+      "",
+    ].join("\n"));
+    writeFileSync(join(home, "catalog.json"), JSON.stringify({ models: [{ slug: "gpt-test", base_instructions: "Base." }] }), "utf8");
+    const previousHome = process.env.CODEX_HOME;
+    process.env.CODEX_HOME = home;
+    setPromptTextProbeCommandForTests({
+      binary: process.execPath,
+      args: ["-e", `process.stdout.write(${JSON.stringify(VALID_PROBE_OUTPUT)})`],
+    });
+    try {
+      const result = await probePromptText(2_000);
+      expect(result.base).toMatchObject({
+        text: null,
+        reason: "override-unreadable",
+        sourcePath: fifo,
+        effectiveTextAvailable: false,
+      });
+    } finally {
+      if (previousHome === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = previousHome;
+    }
+  });
 });
 
 describe("prompt probe process lifecycle", () => {
