@@ -856,6 +856,23 @@ describe("020 coverage completions", () => {
     expect(probe).toContain("Buffer.concat(chunks).toString(\"utf8\")");
   });
 
+  test("26b. the text route omits raw process diagnostics", async () => {
+    const fx = fixture("");
+    setPromptTextProbeCommandForTests({
+      binary: process.execPath,
+      args: ["-e", "process.stderr.write('oauth-secret=do-not-return'); process.exit(1)"],
+    });
+    const res = await call("GET", "/api/codex-prompt/text", fx);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      ok: false,
+      detail: "codex debug prompt-input failed",
+      failure: { kind: "execution-failed", command: expect.any(String) },
+    });
+    expect(res.body.failure).not.toHaveProperty("detail");
+    expect(JSON.stringify(res.body)).not.toContain("oauth-secret=do-not-return");
+  });
+
   test("27. the text route forwards live request cancellation to its exact child", async () => {
     const fx = fixture("");
     const pidPath = join(fx.decoyHome, "probe-pid.txt");

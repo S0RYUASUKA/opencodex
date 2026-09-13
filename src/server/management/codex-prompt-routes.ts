@@ -326,7 +326,15 @@ export async function handleCodexPromptRoutes(ctx: ManagementContext): Promise<R
     // the selected base variant changes its separate .md file without moving the
     // optimistic-concurrency revision.
     const promptStateFingerprint = computePromptProbeStateFingerprint(paths(ctx));
-    return jsonResponse(await probePromptText(15_000, req.signal, promptStateFingerprint), 200, req, ctx.config);
+    const result = await probePromptText(15_000, req.signal, promptStateFingerprint);
+    // Process stderr can contain credentials or OAuth material. Keep the stable
+    // failure classification and command for diagnosis, but never expose the raw
+    // child detail through the management response.
+    const { failure, ...publicResult } = result;
+    return jsonResponse({
+      ...publicResult,
+      ...(failure ? { failure: { kind: failure.kind, command: failure.command } } : {}),
+    }, 200, req, ctx.config);
   }
 
   if (url.pathname === "/api/codex-prompt/toggle" && req.method === "PUT") {
