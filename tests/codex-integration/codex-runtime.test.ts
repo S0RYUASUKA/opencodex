@@ -547,6 +547,104 @@ describe("resolveCodexRuntime", () => {
     expect(probeCalls).toBe(0);
   });
 
+  test("nonblocking resolution does not replace the authoritative process cache", () => {
+    const deps = { env: { PATH: "" }, discoverAlternatives: false };
+    resetCodexRuntimeResolveCacheForTests();
+    setCodexRuntimeResolveCacheForTests({
+      runtime: { command: "validated-codex", version: "0.154.0", source: "path" },
+      failures: [],
+    }, deps);
+    const before = peekCodexRuntimeProcessCache();
+    expect(before.kind).toBe("available");
+
+    const selected = resolveCodexRuntime({ ...deps, probeVersion: false });
+    expect(selected.runtime.version).toBeNull();
+    expect(peekCodexRuntimeProcessCache()).toEqual(before);
+  });
+
+  test("nonblocking resolution separates installed-discovery environments", () => {
+    const previousOpenCodexHome = process.env.OPENCODEX_HOME;
+    process.env.OPENCODEX_HOME = tempConfigDir();
+
+    const installWindows = (localAppData: string, name: string): string => {
+      const command = join(localAppData, "OpenAI", "Codex", "bin", name, "codex.exe");
+      mkdirSync(dirname(command), { recursive: true });
+      writeFileSync(command, "");
+      return command;
+    };
+    const installUnix = (home: string): string => {
+      const command = join(home, ".codex", "packages", "standalone", "current", "bin", "codex");
+      mkdirSync(dirname(command), { recursive: true });
+      writeFileSync(command, "");
+      return command;
+    };
+
+    try {
+      const windowsRootA = tempConfigDir();
+      const windowsRootB = tempConfigDir();
+      const windowsA = installWindows(windowsRootA, "windows-a");
+      const windowsB = installWindows(windowsRootB, "windows-b");
+      const firstWindows = resolveCodexRuntime({
+        env: { LOCALAPPDATA: windowsRootA, PATH: "" },
+        platform: "win32",
+        discoverAlternatives: false,
+        probeVersion: false,
+      });
+      const secondWindows = resolveCodexRuntime({
+        env: { LOCALAPPDATA: windowsRootB, PATH: "" },
+        platform: "win32",
+        discoverAlternatives: false,
+        probeVersion: false,
+      });
+      expect(firstWindows.runtime.command).toBe(windowsA);
+      expect(secondWindows.runtime.command).toBe(windowsB);
+
+      resetCodexRuntimeResolveCacheForTests();
+      const homeA = tempConfigDir();
+      const homeB = tempConfigDir();
+      const unixA = installUnix(homeA);
+      const unixB = installUnix(homeB);
+      const firstHome = resolveCodexRuntime({
+        env: { HOME: homeA, PATH: "" },
+        platform: "linux",
+        discoverAlternatives: false,
+        probeVersion: false,
+      });
+      const secondHome = resolveCodexRuntime({
+        env: { HOME: homeB, PATH: "" },
+        platform: "linux",
+        discoverAlternatives: false,
+        probeVersion: false,
+      });
+      expect(firstHome.runtime.command).toBe(unixA);
+      expect(secondHome.runtime.command).toBe(unixB);
+
+      resetCodexRuntimeResolveCacheForTests();
+      const profileA = tempConfigDir();
+      const profileB = tempConfigDir();
+      const profileUnixA = installUnix(profileA);
+      const profileUnixB = installUnix(profileB);
+      const firstProfile = resolveCodexRuntime({
+        env: { HOME: "", USERPROFILE: profileA, PATH: "" },
+        platform: "linux",
+        discoverAlternatives: false,
+        probeVersion: false,
+      });
+      const secondProfile = resolveCodexRuntime({
+        env: { HOME: "", USERPROFILE: profileB, PATH: "" },
+        platform: "linux",
+        discoverAlternatives: false,
+        probeVersion: false,
+      });
+      expect(firstProfile.runtime.command).toBe(profileUnixA);
+      expect(secondProfile.runtime.command).toBe(profileUnixB);
+    } finally {
+      if (previousOpenCodexHome === undefined) delete process.env.OPENCODEX_HOME;
+      else process.env.OPENCODEX_HOME = previousOpenCodexHome;
+      resetCodexRuntimeResolveCacheForTests();
+    }
+  });
+
   test("valid configured runtime beats shim and PATH", () => {
     const configDir = tempConfigDir();
     persistCodexRuntime({

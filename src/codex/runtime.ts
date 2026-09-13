@@ -530,6 +530,12 @@ interface ResolveCacheMemo {
   readonly value: DeepReadonly<ResolveCodexRuntimeResult>;
 }
 
+interface NonblockingResolveCacheMemo {
+  readonly key: string;
+  readonly at: number;
+  readonly value: DeepReadonly<ResolveCodexRuntimeResult>;
+}
+
 export type CodexRuntimeProcessCachePeek =
   | Readonly<{
       kind: "available";
@@ -541,6 +547,7 @@ export type CodexRuntimeProcessCachePeek =
 
 let resolveCacheEpoch = 0;
 let resolveCache: ResolveCacheMemo | null = null;
+let nonblockingResolveCache: NonblockingResolveCacheMemo | null = null;
 
 /**
  * Bumped whenever persisted runtime state is replaced or process authority is cleared.
@@ -568,6 +575,7 @@ function publishResolveCache(key: string, at: number, value: ResolveCodexRuntime
 function clearResolveCache(): void {
   resolveCacheEpoch += 1;
   resolveCache = null;
+  nonblockingResolveCache = null;
 }
 
 /** Clear process-local runtime authority without resolving a replacement. */
@@ -614,6 +622,9 @@ function resolveCacheKey(deps: ResolveCodexRuntimeDeps): string | null {
     platform: deps.platform ?? process.platform,
     discover: deps.discoverAlternatives !== false,
     probeVersion: deps.probeVersion !== false,
+    localAppData: env.LOCALAPPDATA?.trim() ?? "",
+    homeDir: env.HOME?.trim() ?? "",
+    userProfile: env.USERPROFILE?.trim() ?? "",
     home: process.env.OPENCODEX_HOME ?? "",
     persisted: persistedRuntimeCacheStamp(deps),
   });
@@ -624,6 +635,25 @@ function resolveCacheKey(deps: ResolveCodexRuntimeDeps): string | null {
  */
 export function resolveCodexRuntime(deps: ResolveCodexRuntimeDeps = {}): ResolveCodexRuntimeResult {
   const cacheKey = resolveCacheKey(deps);
+  // A prompt-only selection has no validated version and must not publish into runtime authority.
+  if (deps.probeVersion === false) {
+    if (cacheKey
+      && nonblockingResolveCache
+      && nonblockingResolveCache.key === cacheKey
+      && Date.now() - nonblockingResolveCache.at < RESOLVE_CACHE_MS) {
+      return cloneAndDeepFreeze(nonblockingResolveCache.value);
+    }
+
+    const result = resolveCodexRuntimeUncached(deps);
+    if (!cacheKey) return cloneAndDeepFreeze(result);
+    nonblockingResolveCache = {
+      key: cacheKey,
+      at: Date.now(),
+      value: cloneAndDeepFreeze(result),
+    };
+    return cloneAndDeepFreeze(nonblockingResolveCache.value);
+  }
+
   if (cacheKey && resolveCache && resolveCache.key === cacheKey && Date.now() - resolveCache.at < RESOLVE_CACHE_MS) {
     return cloneAndDeepFreeze(resolveCache.value);
   }
