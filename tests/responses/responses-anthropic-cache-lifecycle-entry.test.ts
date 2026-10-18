@@ -142,8 +142,9 @@ async function invoke(role: string, entry: string, stream: boolean, cfg = config
   return { ...r, response, logCtx };
 }
 
-test("image-count pressure summarizes once, preserves the latest tool pair and reuses the checkpoint", async () => {
-  const baseline = await invoke("main", "http", false); await baseline.response.text();
+for (const enabled of [false, true]) test(`image-count pressure preserves prefixes and latest tool pair independently of renewal: enabled=${enabled}`, async () => {
+  const cfg = config(); cfg.anthropicCacheRenewal = enabled;
+  const baseline = await invoke("main", "http", false, cfg); await baseline.response.text();
   const prefix = sent[0].body;
   const r = request("main", "http", false), raw = await r.req.json() as any;
   const own = randomUUID(), headers = new Headers(r.req.headers); headers.set("thread-id", own);
@@ -156,7 +157,7 @@ test("image-count pressure summarizes once, preserves the latest tool pair and r
     ]).flat()];
   const send = async () => {
     const response = await handleResponses(new Request(r.req.url, { method: "POST", headers, body: JSON.stringify(raw) }),
-      config(), { model: "", provider: "" } as any, r.options);
+      cfg, { model: "", provider: "" } as any, r.options);
     const text = await response.text(); expect(response.ok).toBe(true); expect(text).toContain("response.completed");
   };
   const summaries = () => sent.filter(item => JSON.stringify(item.body.messages.at(-1)).includes("CONTEXT CHECKPOINT COMPACTION"));
@@ -173,6 +174,11 @@ test("image-count pressure summarizes once, preserves the latest tool pair and r
   expect(JSON.stringify(final.messages)).toContain("image_100");
   const count = summaries().length;
   await send(); expect(summaries()).toHaveLength(count); expect(denied).toBe(0);
+  if (!enabled) {
+    await clock.advance(270000);
+    expect(sent.some(item => item.body.max_tokens === 0)).toBe(false);
+    expect(listeners.size).toBe(0);
+  }
 });
 
 for (const role of ["main", "child"]) for (const entry of ["http", "ws"]) {
