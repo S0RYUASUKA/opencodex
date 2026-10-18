@@ -117,6 +117,7 @@ import { chargeWorkflowSends } from "../../lib/workflow-budget";
 import { isAntigravityValidationRefusal } from "./antigravity-validation-refusal";
 import { unboundPoolSpendRefusalResponse } from "../workflow-refusal";
 import { AdmissionModelDeniedError, admissionModelDeniedResponse } from "../admission-model-scope";
+import { naturalCacheScope } from "../../anthropic/cache-renewal-runtime";
 
 /** One responsibility of the Responses request pipeline; state owners are explicit. */
 export async function prepareAdapterExchange(
@@ -215,6 +216,9 @@ export async function prepareAdapterExchange(
     subagentQuotaFailureModel,
   } = requestState;
   const { cancelResponseCompletion, notifyResponseComplete, refreshRequestToolAliases } = responseEffects;
+  const cacheRenewalScope = () => naturalCacheScope({ ...requestContext, parsed,
+    adapterName: transportState.activeAdapter.name, providerName: route.providerName,
+    oauth: route.provider.authMode === "oauth", conversationId: logCtx.conversationId });
   const {
     adapterSendBudget,
     adapterDispatchBudget,
@@ -399,8 +403,9 @@ export async function prepareAdapterExchange(
   };
   const autoPauseEnabled = config.providers[route.providerName]?.accountAutoPause?.enabled === true;
   const billingPoolRequest = isAnthropicBillingKeyPool(route.provider);
+  const imageContextBudget = parsed._anthropicImageOwner !== undefined;
   let billingRecoveryActive = false;
-  const genericRefetchCountsSends = () => sendBudgetState.adapterSendBudget?.spendEnforced === true
+  const genericRefetchCountsSends = () => imageContextBudget || sendBudgetState.adapterSendBudget?.spendEnforced === true
     || transientRetryPolicyFor(route.provider) !== null || resetReplayPolicyFor(route.provider) !== null
     || billingPoolRequest || billingRecoveryActive || autoPauseEnabled;
   let handoffPermit: ResponsesSendBudget["pendingHopPermit"];
@@ -497,6 +502,7 @@ export async function prepareAdapterExchange(
             body: builtInitialRequest.body,
           }, recovery), upstream.signal, connectMs, parsed.stream,
             providerFetch(route.provider, options.codexWsRuntimeIdentity, {
+              anthropicCacheRenewal: cacheRenewalScope(),
               dispatchOverride: oauthDispatch(builtInitialRequest),
               providerName: route.providerName,
               modelId: route.modelId,
@@ -523,11 +529,11 @@ export async function prepareAdapterExchange(
           abortSignal: upstream.signal,
           label: safeHostLabel(builtInitialRequest.url),
           claimAmbiguousResend: claimPreHeaderResend,
-          ...(sendBudgetState.adapterSendBudget?.spendEnforced || options.comboDispatchPermit || transientPolicy || resetPolicy || compactPrepaid || options.comboAttempt
+          ...(imageContextBudget || sendBudgetState.adapterSendBudget?.spendEnforced || options.comboDispatchPermit || transientPolicy || resetPolicy || compactPrepaid || options.comboAttempt
             || billingPoolRequest || autoPauseEnabled
             ? {
               // A pending compaction permit already booked this leg's first physical send.
-              ...(transientPolicy || resetPolicy || compactPrepaid || options.comboAttempt || autoPauseEnabled
+              ...(imageContextBudget || transientPolicy || resetPolicy || compactPrepaid || options.comboAttempt || autoPauseEnabled
                 ? {
                   attempts: Math.min(initialSendCap,
                     sendBudgetState.initialSendAllowance(initialSendCap) + (compactPrepaid ? 1 : 0)),
@@ -790,6 +796,7 @@ export async function prepareAdapterExchange(
                     method: retryRequest.method, headers: retryRequest.headers, body: retryRequest.body,
                   }, recoveryKind), upstream.signal, connectMs, parsed.stream,
                   providerFetch(route.provider, options.codexWsRuntimeIdentity, {
+                    anthropicCacheRenewal: cacheRenewalScope(),
                     dispatchOverride: oauthDispatch(retryRequest),
                     onPhysicalDispatch: deferredRefetch ? () => {
                       if (!deferredRefetch.beforeDispatch()) throw new SendBudgetExhaustedError(safeHostLabel(retryRequest.url));
@@ -1749,7 +1756,7 @@ export async function prepareAdapterExchange(
       }
       // Anthropic 413 request_too_large: rebuild once with every image one tier lower
       // (spiral guard: single attempt). The biased response re-enters the 429 check above.
-      if (shouldAttemptImageTierRetry({
+      if (transportState.activeAdapter.name !== "anthropic" && shouldAttemptImageTierRetry({
         status: upstreamResponse.status,
         adapterName: transportState.activeAdapter.name,
         parsed,

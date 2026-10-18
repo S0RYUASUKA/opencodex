@@ -1,4 +1,8 @@
 { "combo-description.test.ts": "routing", "combo-description-catalog.test.ts": "codex-integration", "catalog-auto-review-override.test.ts": "codex-integration", "management-auto-review-settings.test.ts": "server", "management-auto-review-auth.test.ts": "server", "prefer-model-alias-ids.test.ts": "server", "responses-mimo-envelope.test.ts": "responses", "responses-call-id-linkage.test.ts": "responses",
+    "anthropic-cache-renewal.test.ts": "adapters/anthropic",
+    "responses-anthropic-cache-prefix.test.ts": "responses",
+    "responses-anthropic-cache-lifecycle-entry.test.ts": "responses",
+    "codex-cache-runtime-record.test.ts": "codex-integration",
     "bridge-terminal-refusal.test.ts": "adapters",
     "loop-terminal-refusal.test.ts": "images",
     "web-search-terminal-refusal.test.ts": "web-search",

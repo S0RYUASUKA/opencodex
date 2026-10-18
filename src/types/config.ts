@@ -1091,6 +1091,8 @@ export interface OcxConfig {
   appOwnedMemoryBudgetMb?: number;
   /** Anthropic prompt-cache retention: "short" = 5-min ephemeral (default), "long" = 1-hour extended, "none" = disabled. */
   cacheRetention?: "none" | "short" | "long";
+  /** Opt-in zero-output Anthropic cache reads while a verified Codex turn is running. Default false. */
+  anthropicCacheRenewal?: boolean;
   /** Web-search sidecar: route web_search for non-OpenAI models through a gpt-mini via ChatGPT passthrough. */
   webSearchSidecar?: OcxWebSearchSidecarConfig;
   /**

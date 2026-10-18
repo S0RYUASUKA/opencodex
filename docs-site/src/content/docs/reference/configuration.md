@@ -29,6 +29,25 @@ uses the fresh-install default: one `openai` forward provider.
 
 ## Precedence and defaults
 
+### Anthropic running-turn cache renewal
+
+`anthropicCacheRenewal` is an optional top-level boolean, off by default. Set it to `true`
+in `config.json` to renew compatible five-minute Anthropic caches while a verified Codex
+main or child turn is running. Existing `cacheRetention` choices are preserved; one-hour
+and disabled caches are not renewed. Natural cache usage resets the timer. At four minutes
+and thirty seconds without a newer confirmation, OpenCodex sends the same cached prefix
+with zero output tokens. Renewal stops when the turn ends or its running state is unknown.
+
+Renewal is billable at the provider's cache-read rates. Failed or cancelled sends can still
+incur charges; renewal cannot guarantee a hit during outages or after expiry. Reliable local
+IPC is required, with a native rollout/writer-lock fallback currently limited to Windows.
+This setting has no dedicated dashboard control and does not change native Codex.
+
+Anthropic image history keeps stable encodings. When the aggregate image or complete request
+limit is reached, the Responses bridge summarizes old history and continues with the newest
+image and its paired tool results. An individually oversized latest input still needs to be
+reduced. Summary calls are also billed normally; no tools execute during summarization.
+
 ### Provider and model aliases
 
 Aliases are optional short request names. They never change the native model id sent upstream, and omitting every alias field preserves existing routing exactly.

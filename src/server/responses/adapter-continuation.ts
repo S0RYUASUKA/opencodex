@@ -64,10 +64,11 @@ import {
 } from "../../lib/response-body-inactivity";
 import { resolveStallTimeoutMs } from "../../stall-timeout";
 import { guardTerminalEventStream } from "./terminal-guard";
+import { naturalCacheScope } from "../../anthropic/cache-renewal-runtime";
 
 /** One responsibility of the Responses request pipeline; state owners are explicit. */
 export function createAdapterContinuations(
-  requestContext: Pick<ResponsesRequestContext, "options" | "logCtx" | "config">,
+  requestContext: Pick<ResponsesRequestContext, "options" | "logCtx" | "config" | "req">,
   requestState: Pick<
     PreparedResponsesRequest,
     | "route"
@@ -287,6 +288,9 @@ export function createAdapterContinuations(
               connectMs,
               nextParsed.stream,
               providerFetch(route.provider, options.codexWsRuntimeIdentity, {
+                anthropicCacheRenewal: naturalCacheScope({ ...requestContext, parsed: nextParsed,
+                  adapterName: transportState.activeAdapter.name, providerName: route.providerName,
+                  oauth: route.provider.authMode === "oauth", conversationId: logCtx.conversationId }),
               dispatchOverride: oauthDispatch(builtContinuationRequest, nextParsed),
                 providerName: route.providerName,
                 modelId: nextParsed.modelId,

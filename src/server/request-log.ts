@@ -88,6 +88,7 @@ import {
 } from "../usage/jev-stats";
 import { generationWindowFields, recordGenerationEvent } from "./request-log-generation-window";
 import type { RequestMetricsRecorder } from "./request-metrics";
+import { captureRequestOrigin, requestOriginLogRecord, type RequestOrigin, type RequestOriginOptions } from "./request-origin";
 import type {
   CacheDiagnosticDraft,
   CacheDiagnosticFinalFacts,
@@ -125,6 +126,8 @@ export interface RequestLogContext extends UpstreamErrorDiagnostics {
   logicalRequestId?: string;
   /** Process-local privacy-bounded cache diagnostic; never persisted with request logs. */
   cacheDiagnosticDraft?: CacheDiagnosticDraft;
+  /** Content-free ingress identity, correlated with the final request id. */
+  requestOrigin?: RequestOrigin;
   /**
    * Internal live reference to this request's execution budget; omitted from RequestLogEntry and
    * JSONL. Read at final-log time so the row reports the budget's FINAL state rather than a
@@ -273,12 +276,19 @@ export interface RequestLogContext extends UpstreamErrorDiagnostics {
   claudeCompatibility?: PersistedClaudeCompatibilityLog;
 }
 
+export function observeRequestOrigin(logCtx: RequestLogContext, body: unknown, headers: Headers, options?: RequestOriginOptions): void {
+  // A retry/compact replay must not relabel the caller that owns this logical request.
+  logCtx.requestOrigin ??= captureRequestOrigin(body, headers, options);
+}
+
 export function observeCacheDiagnosticInbound(
   logCtx: RequestLogContext,
   body: unknown,
   headers: Headers,
   source: PromptCacheKeySource,
+  originOptions?: RequestOriginOptions,
 ): void {
+  observeRequestOrigin(logCtx, body, headers, originOptions);
   const draft = cacheDiagnosticHooks()?.observeInbound(body, headers, source);
   if (draft) logCtx.cacheDiagnosticDraft = draft;
 }
@@ -293,6 +303,8 @@ export function rebindCacheDiagnosticBody(
 
 export interface RequestLogEntry extends UpstreamErrorDiagnostics {
   requestId: string;
+  /** Transient diagnostic handoff; removed before the ring and disk projections. */
+  requestOriginDiagnostic?: { origin?: RequestOrigin };
   /** The logical request this row belongs to (#4546); absent on rows written without a budget. */
   logicalRequestId?: string;
   timestamp: number;
@@ -604,7 +616,18 @@ export function rehydrateRequestLogsAfterLedgerReplacement(
   return hydrateRequestLogsFromDisk(reader);
 }
 
+function hasAnthropicAdapter(log: { provider: string; providerAdapter?: string; attempts?: readonly { adapter?: string }[] }): boolean {
+  return log.providerAdapter === "anthropic" || log.provider === "anthropic"
+    || log.attempts?.some(attempt => attempt.adapter === "anthropic") === true;
+}
+
 export function addRequestLog(entry: RequestLogEntry) {
+  if (entry.requestOriginDiagnostic || hasAnthropicAdapter(entry)) {
+    try {
+      console.info("[opencodex-request-origin]", JSON.stringify(requestOriginLogRecord(
+        entry.requestId, entry.timestamp, entry.status, entry.requestOriginDiagnostic?.origin)));
+    } catch { /* Diagnostics must never change request completion. */ }
+  }
   // Sanitize ONCE, at the ingress, and use that one value for both destinations.
   //
   // `addFinalRequestLog` is not the only way in: `addRequestLog` is exported and callable
@@ -621,8 +644,10 @@ export function addRequestLog(entry: RequestLogEntry) {
     && servedModel === entry.servedModel
     && entry.claudeCompatibility === undefined
     && entry.jevDecision === undefined
+    && entry.requestOriginDiagnostic === undefined
     ? entry
     : { ...entry, ...(shadowCallRewrittenFrom ? { shadowCallRewrittenFrom } : {}) };
+  if (retained !== entry) delete retained.requestOriginDiagnostic;
   if (!shadowCallRewrittenFrom && retained !== entry) delete retained.shadowCallRewrittenFrom;
   if (!servedModel && retained !== entry) {
     delete retained.servedModel;
@@ -1489,6 +1514,7 @@ export function addFinalRequestLog(
   const protocolTrace = protocolTraceForRequest(logCtx, logCtx.attempts);
   addLog({
     requestId,
+    ...(hasAnthropicAdapter(logCtx) ? { requestOriginDiagnostic: { origin: logCtx.requestOrigin } } : {}),
     ...(isLogicalRequestId(logicalRequestId) ? { logicalRequestId } : {}),
     timestamp: start,
     model: isCombo ? logCtx.requestedModel! : logCtx.model,

@@ -143,20 +143,20 @@ describe("conversationIdFromResponsesRequest", () => {
 describe("reasoningReplayConversationIdFromResponsesRequest", () => {
   test("keeps the raw identity instead of the hashed log id", () => {
     expect(reasoningReplayConversationIdFromResponsesRequest({
-      clientThreadId: "parent-thread",
-    })).toBe("parent-thread");
+      threadIdHeader: "own-thread",
+    })).toBe("own-thread");
     expect(reasoningReplayConversationIdFromResponsesRequest({
       sessionIdHeader: "session",
     })).not.toBe(digest32("session"));
   });
 
-  test("prefers parent thread, then thread-id, then cursor, then session_id", () => {
+  test("prefers own thread, then cursor, then standalone session; parent never owns replay", () => {
     expect(reasoningReplayConversationIdFromResponsesRequest({
       clientThreadId: "parent-thread",
       threadIdHeader: "thread",
       cursorConversationId: "cursor",
       sessionIdHeader: "session",
-    })).toBe("parent-thread");
+    })).toBe("thread");
     expect(reasoningReplayConversationIdFromResponsesRequest({
       threadIdHeader: "thread",
       cursorConversationId: "cursor",
@@ -169,6 +169,9 @@ describe("reasoningReplayConversationIdFromResponsesRequest", () => {
     expect(reasoningReplayConversationIdFromResponsesRequest({
       sessionIdHeader: "session",
     })).toBe("session");
+    expect(reasoningReplayConversationIdFromResponsesRequest({
+      clientThreadId: "parent-thread", sessionIdHeader: "shared-session",
+    })).toBeUndefined();
   });
 
   test("skips empty, control-bearing, and overlong fallbacks", () => {
