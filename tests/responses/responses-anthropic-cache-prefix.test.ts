@@ -7,7 +7,16 @@ const cache = await import(`${root}/src/anthropic/cache-renewal.ts`);
 const { createResponsesEffects } = await import(`${root}/src/server/responses/response-effects.ts`);
 const { guardCompactionSummary } = await import(`${root}/src/responses/compaction-summary.ts`);
 const { createTranslatorBudget } = await import(`${root}/src/lib/translator-budget.ts`);
+const observations = await import(`${root}/src/lib/anthropic-cache-observation.ts`);
 const retain = cache.retainCachePrefix;
+test("an optional cache observer failure never breaks a natural response", () => {
+  const response = new Response("natural answer");
+  let calls = 0;
+  observations.attachCacheObservation(response, () => { calls++; throw new Error("synthetic observer failure"); });
+  const wrapped = observations.inheritCacheObservation(response, new Response("natural answer"));
+  expect(() => observations.observeAnthropicCacheUsage(wrapped, {})).not.toThrow();
+  expect(calls).toBe(1);
+});
 const identity = (model: string) => ({ providerName: model, providerDestinationIdentity: model,
   providerDestinationDurableIdentity: model, adapterName: model, modelId: model,
   credentialIdentity: "offline", credentialDurableIdentity: "offline" });

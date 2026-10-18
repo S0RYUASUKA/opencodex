@@ -138,7 +138,8 @@ class ThreadRuntimeSubscription {
 
   close(): void {
     if (this.closed) return;
-    try { if (this.owner) this.following(false); } catch {}
+    try { if (this.owner) this.following(false); }
+    catch { this.socket?.destroy(); } // A failed unsubscribe still closes the local subscription.
     this.closed = true;
     this.available = false;
     for (const row of this.pending.values()) { clearTimeout(row.timer); row.reject(new Error("runtime-ipc-closed")); }

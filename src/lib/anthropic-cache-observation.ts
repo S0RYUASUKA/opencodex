@@ -14,5 +14,6 @@ export function inheritCacheObservation(from: Response, to: Response): Response 
 }
 
 export function observeAnthropicCacheUsage(response: Response, usage: unknown): void {
-  try { observers.get(response)?.(usage); } catch {}
+  try { observers.get(response)?.(usage); }
+  catch { return; } // Optional observation failure must not fail the natural response.
 }
