@@ -55,7 +55,7 @@ const sent: any[] = [];
 const cache = new Map<string, number>();
 let hold = false, finishStream: (() => void) | undefined, coldWarm = false;
 let hangRenewal = false, deferNatural = false, releaseNatural: (() => void) | undefined;
-let emptyNatural = false, refuseContinuation = false;
+let emptyNatural = false, terminalNatural = false, refuseContinuation = false;
 const encoder = new TextEncoder();
 function frame(event: string, data: any) { return encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); }
 globalThis.fetch = (async (url: any, init: any) => {
@@ -74,6 +74,7 @@ globalThis.fetch = (async (url: any, init: any) => {
   if (emptyNatural) {
     emptyNatural = false;
     const empty = { id: "msg_empty", type: "message", model: body.model, content: [], stop_reason: "end_turn", usage };
+    if (!body.stream) return Response.json(empty);
     return new Response(new ReadableStream({ start(controller) {
       controller.enqueue(frame("message_start", { type: "message_start", message: empty }));
       controller.enqueue(frame("message_delta", { type: "message_delta", delta: { stop_reason: "end_turn" }, usage }));
@@ -81,13 +82,14 @@ globalThis.fetch = (async (url: any, init: any) => {
     } }), { headers: { "content-type": "text/event-stream" } });
   }
   if (deferNatural) await new Promise<void>(resolve => { releaseNatural = resolve; });
-  const result = { id: "msg_natural", type: "message", model: body.model, content: [{ type: "text", text: "Fixture summary." }], stop_reason: "end_turn", usage: { ...usage, output_tokens: 3 } };
+  const text = terminalNatural ? "I will inspect the file now." : "Fixture summary."; terminalNatural = false;
+  const result = { id: "msg_natural", type: "message", model: body.model, content: [{ type: "text", text }], stop_reason: "end_turn", usage: { ...usage, output_tokens: 3 } };
   if (!body.stream) return Response.json(result);
   return new Response(new ReadableStream({ start(controller) {
     controller.enqueue(frame("message_start", { type: "message_start", message: { ...result, content: [], usage } }));
     const finish = () => {
       controller.enqueue(frame("content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }));
-      controller.enqueue(frame("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Fixture summary." } }));
+      controller.enqueue(frame("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text } }));
       controller.enqueue(frame("content_block_stop", { type: "content_block_stop", index: 0 }));
       controller.enqueue(frame("message_delta", { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: result.usage }));
       controller.enqueue(frame("message_stop", { type: "message_stop" })); controller.close();
@@ -113,7 +115,7 @@ afterAll(() => {
   rmSync(root, { recursive: true, force: true });
 });
 beforeEach(() => { stopAnthropicCacheRenewal(); clock.jobs.clear(); clock.now = 0; sent.length = 0; cache.clear(); hold = false; finishStream = undefined; coldWarm = false;
-  hangRenewal = deferNatural = emptyNatural = refuseContinuation = false; releaseNatural = undefined; });
+  hangRenewal = deferNatural = emptyNatural = terminalNatural = refuseContinuation = false; releaseNatural = undefined; });
 
 function config(retention = "short"): any { return { defaultProvider: "anthropic", cacheRetention: retention,
   anthropicCacheRenewal: true, multiAgentGuidanceEnabled: false,
@@ -153,11 +155,15 @@ async function invoke(role: string, entry: string, stream: boolean, cfg = config
   return { ...r, response, logCtx };
 }
 
-test("non-stream clients parse an SSE empty-completion continuation when renewal is enabled", async () => {
-  emptyNatural = true;
+for (const enabled of [false, true]) for (const trigger of ["empty", "terminal"]) test(`non-stream ${trigger} continuation follows the actual wire: renewal=${enabled}`, async () => {
+  emptyNatural = trigger === "empty"; terminalNatural = trigger === "terminal";
   const cfg = config(); cfg.emptyCompletionRetry = true; cfg.webSearchSidecar.enabled = false;
-  const result = await invoke("main", "http", false, cfg);
-  expect(await result.response.text()).toContain("Fixture summary.");
+  cfg.anthropicCacheRenewal = enabled;
+  const r = request("main", "http", false), raw = await r.req.json() as any;
+  raw.input[0].content[0].text = "Inspect the file with fixture_tool and continue.";
+  const response = await handleResponses(new Request(r.req.url, { method: "POST", headers: r.req.headers, body: JSON.stringify(raw) }), cfg, { model: "", provider: "" } as any, r.options);
+  const result = await response.json();
+  expect(result.status).toBe("completed"); expect(JSON.stringify(result.output)).toContain("Fixture summary.");
   expect(sent).toHaveLength(2);
 });
 
