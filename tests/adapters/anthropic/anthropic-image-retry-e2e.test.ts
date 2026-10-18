@@ -9,7 +9,7 @@ import { resetNormalizeStateForTests } from "../../../src/adapters/anthropic-ima
 import { sniffImageDimensions } from "../../../src/adapters/anthropic-image-guard";
 import type { OcxConfig } from "../../../src/types";
 import { installIsolatedCodexHome, type IsolatedCodexHome } from "../../helpers/isolated-codex-home";
-import { removeTreeWithRetry } from "../../helpers/remove-tree";
+import { removeTreeAfterBackgroundWork } from "../../helpers/remove-tree";
 
 let testDir = "";
 let previousHome: string | undefined;
@@ -25,15 +25,18 @@ beforeEach(() => {
   resetNormalizeStateForTests();
 });
 
-afterEach(() => {
+afterEach(async () => {
   upstream?.stop(true);
   upstream = null;
-  if (previousHome === undefined) delete process.env.OPENCODEX_HOME;
-  else process.env.OPENCODEX_HOME = previousHome;
-  isolatedCodexHome?.restore();
-  isolatedCodexHome = null;
-  if (testDir) removeTreeWithRetry(testDir);
-  clearKeyCooldowns();
+  try {
+    if (testDir) await removeTreeAfterBackgroundWork(testDir);
+  } finally {
+    if (previousHome === undefined) delete process.env.OPENCODEX_HOME;
+    else process.env.OPENCODEX_HOME = previousHome;
+    isolatedCodexHome?.restore();
+    isolatedCodexHome = null;
+    clearKeyCooldowns();
+  }
 });
 
 const ONE_PX_PNG =

@@ -55,9 +55,10 @@ function config(): OcxConfig {
     } },
   } as OcxConfig;
 }
-function request(stream = true, thread = "search-thinking-thread", signed = true): Request {
+function request(stream = true, thread = "search-thinking-thread", signed = true, ownThread = true): Request {
   return new Request("http://localhost/v1/responses", {
-    method: "POST", headers: { "content-type": "application/json", "x-codex-parent-thread-id": thread },
+    method: "POST", headers: { "content-type": "application/json", "x-codex-parent-thread-id": thread,
+      ...(ownThread ? { "thread-id": thread } : {}) },
     body: JSON.stringify({ model: "anthropic-test/claude-sonnet-4-5", stream, store: false,
       tools: [{ type: "web_search" }, { type: "function", name: "lookup", parameters: { type: "object", properties: {} } }],
       input: [
@@ -139,6 +140,15 @@ function removeThinking(body: string): unknown {
 }
 
 describe("hosted web search Anthropic thinking-signature recovery", () => {
+  test("parent-only provenance cannot publish a stripped-history memo for a child", async () => {
+    const { bodies } = transport(index => index === 1 ? rejection() : success());
+    await send({}, config(), request(true, "shared-parent", true, false));
+    expect(bodies).toHaveLength(2);
+    expectStripped(bodies[1]);
+    await send({}, config(), request(true, "shared-parent", true, false));
+    expect(bodies).toHaveLength(3);
+    expect(bodies[2]).toContain(SIGNATURE);
+  });
   for (const rawSse of [false, true]) {
     test(`signed progress created during search remains eligible for recovery (SSE=${rawSse})`, async () => {
       const cfg = config();
