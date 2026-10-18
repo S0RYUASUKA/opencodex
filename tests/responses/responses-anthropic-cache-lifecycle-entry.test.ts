@@ -55,6 +55,7 @@ const sent: any[] = [];
 const cache = new Map<string, number>();
 let hold = false, finishStream: (() => void) | undefined, coldWarm = false;
 let hangRenewal = false, deferNatural = false, releaseNatural: (() => void) | undefined;
+let emptyNatural = false, refuseContinuation = false;
 const encoder = new TextEncoder();
 function frame(event: string, data: any) { return encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); }
 globalThis.fetch = (async (url: any, init: any) => {
@@ -68,6 +69,16 @@ globalThis.fetch = (async (url: any, init: any) => {
     if (hangRenewal) return new Promise<Response>(() => {});
     expect(body.stream).toBe(false);
     return Response.json({ id: "msg_warm", type: "message", model: body.model, content: [], stop_reason: "max_tokens", usage });
+  }
+  if (refuseContinuation && !emptyNatural) return new Response("request too large", { status: 413 });
+  if (emptyNatural) {
+    emptyNatural = false;
+    const empty = { id: "msg_empty", type: "message", model: body.model, content: [], stop_reason: "end_turn", usage };
+    return new Response(new ReadableStream({ start(controller) {
+      controller.enqueue(frame("message_start", { type: "message_start", message: empty }));
+      controller.enqueue(frame("message_delta", { type: "message_delta", delta: { stop_reason: "end_turn" }, usage }));
+      controller.enqueue(frame("message_stop", { type: "message_stop" })); controller.close();
+    } }), { headers: { "content-type": "text/event-stream" } });
   }
   if (deferNatural) await new Promise<void>(resolve => { releaseNatural = resolve; });
   const result = { id: "msg_natural", type: "message", model: body.model, content: [{ type: "text", text: "Fixture summary." }], stop_reason: "end_turn", usage: { ...usage, output_tokens: 3 } };
@@ -102,7 +113,7 @@ afterAll(() => {
   rmSync(root, { recursive: true, force: true });
 });
 beforeEach(() => { stopAnthropicCacheRenewal(); clock.jobs.clear(); clock.now = 0; sent.length = 0; cache.clear(); hold = false; finishStream = undefined; coldWarm = false;
-  hangRenewal = deferNatural = false; releaseNatural = undefined; });
+  hangRenewal = deferNatural = emptyNatural = refuseContinuation = false; releaseNatural = undefined; });
 
 function config(retention = "short"): any { return { defaultProvider: "anthropic", cacheRetention: retention,
   anthropicCacheRenewal: true, multiAgentGuidanceEnabled: false,
@@ -142,7 +153,43 @@ async function invoke(role: string, entry: string, stream: boolean, cfg = config
   return { ...r, response, logCtx };
 }
 
+test("non-stream clients parse an SSE empty-completion continuation when renewal is enabled", async () => {
+  emptyNatural = true;
+  const cfg = config(); cfg.emptyCompletionRetry = true; cfg.webSearchSidecar.enabled = false;
+  const result = await invoke("main", "http", false, cfg);
+  expect(await result.response.text()).toContain("Fixture summary.");
+  expect(sent).toHaveLength(2);
+});
+
+test("an Anthropic 413 continuation is not resent with identical historical images", async () => {
+  emptyNatural = refuseContinuation = true;
+  const r = request("main", "http", false);
+  const raw = await r.req.json() as any;
+  raw.input[0].content.push({ type: "input_image", image_url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aHe8AAAAASUVORK5CYII=" });
+  const cfg = config(); cfg.emptyCompletionRetry = true; cfg.webSearchSidecar.enabled = false;
+  const response = await handleResponses(new Request(r.req.url, { method: "POST", headers: r.req.headers, body: JSON.stringify(raw) }), cfg, { model: "", provider: "" } as any, r.options);
+  const text = await response.text();
+  expect(text).toContain("empty_completion_retry_failed");
+  expect(sent).toHaveLength(2);
+});
+
+for (const scope of ["root", "identity", "pool"]) test(`renewal cannot bypass a configured ${scope} spend ceiling`, async () => {
+  const cfg = config(); cfg.spend = { [scope]: { maxTokens: 1000000 } };
+  const { response } = await invoke("main", "http", false, cfg); await response.text();
+  await clock.advance(270000);
+  expect(sent).toHaveLength(1); expect(listeners.size).toBe(0);
+});
+
+test("a spend ceiling added after confirmation stops subsequent renewal", async () => {
+  const cfg = config();
+  const { response } = await invoke("main", "http", false, cfg); await response.text();
+  cfg.spend = { root: { maxTokens: 1000000 } };
+  await clock.advance(270000);
+  expect(sent).toHaveLength(1);
+});
+
 for (const enabled of [false, true]) test(`image-count pressure preserves prefixes and latest tool pair independently of renewal: enabled=${enabled}`, async () => {
+  const beforeLogs = new Set(getRequestLogEntries().map(row => row.requestId));
   const cfg = config(); cfg.anthropicCacheRenewal = enabled;
   const baseline = await invoke("main", "http", false, cfg); await baseline.response.text();
   const prefix = sent[0].body;
@@ -174,6 +221,9 @@ for (const enabled of [false, true]) test(`image-count pressure preserves prefix
   expect(JSON.stringify(final.messages)).toContain("image_100");
   const count = summaries().length;
   await send(); expect(summaries()).toHaveLength(count); expect(denied).toBe(0);
+  const summaryLogs = getRequestLogEntries().filter(row => !beforeLogs.has(row.requestId));
+  expect(summaryLogs.length).toBeGreaterThan(0);
+  expect(summaryLogs.every(row => row.status === 200 && !row.errorCode)).toBe(true);
   if (!enabled) {
     await clock.advance(270000);
     expect(sent.some(item => item.body.max_tokens === 0)).toBe(false);

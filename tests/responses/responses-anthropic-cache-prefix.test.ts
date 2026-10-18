@@ -165,13 +165,13 @@ test("compaction explicitly prohibits hosted server tools while retaining their 
   expect(parsed._anthropicServerTools).toHaveLength(1);
 });
 
-for (const kind of ["text", "tool", "empty", "abnormal"] as const) {
+for (const kind of ["text", "tool", "empty", "abnormal", "eof"] as const) {
   test(`summary guard admits only a normally completed tool-free summary: ${kind}`, async () => {
     const budget = createTranslatorBudget();
     async function* events(): AsyncGenerator<any> {
       if (kind === "tool") yield { type: "tool_call_start", id: "synthetic-call", name: "read" };
       if (kind !== "empty") yield { type: "text_delta", text: "summary" };
-      yield { type: "done", stopReason: kind === "abnormal" ? "unexpected_stop" : "end_turn", endTurn: true };
+      yield { type: "done", stopReason: kind === "eof" ? undefined : kind === "abnormal" ? "unexpected_stop" : "end_turn", endTurn: true };
     }
     try {
       const output = [];

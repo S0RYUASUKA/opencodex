@@ -9,6 +9,9 @@ runtime state and usage logging. This does not change native Codex or native Mes
 The optional top-level `anthropicCacheRenewal` boolean defaults off. Only explicit `true`
 enables background sends; existing `cacheRetention` choices remain authoritative. One-hour,
 disabled, externally controlled or incompatible cache requests do not opt into renewal.
+Configured root, identity or pool spend ceilings disable renewal, including a ceiling added after
+confirmation. Detached renewals do not yet reserve their original workflow scopes. Empty spend
+scopes and retention-only accounting stay observational; normal sends retain existing admission.
 
 `src/codex/request-provenance.ts` derives the request's own thread and turn from HTTP or
 per-frame WebSocket metadata. Parent conversation identity is not an own-thread fallback.
@@ -16,7 +19,7 @@ Main and spawned turns follow the same policy; decision, memory and vision helpe
 `src/codex/cache-runtime-state.ts` reads the existing local IPC state. When IPC cannot identify
 a headless child, `src/codex/rollout-cache-runtime.ts` reads that child's native lifecycle and
 `src/codex/thread-writer-lock.ts` verifies the Windows writer lock. Other platforms without
-usable IPC fail closed. Known large compacted/context records do not imply completion;
+usable IPC fail closed; the default endpoint currently supports Windows only. Known large compacted/context records do not imply completion;
 unknown records, missing locks, changed turns and explicit terminal events stop renewal.
 
 The clock starts at physical send, after complete valid upstream cache usage confirms a
@@ -38,6 +41,8 @@ executes a tool or appends anything to client history. Diagnostic records correl
 ids with allowlisted thread/turn/role, phase, counters and fixed network reasons; they contain
 no prompt, image, credential or raw exception. `src/server/request-origin.ts` separately
 correlates natural request logs, keeping missing/conflicting provenance unknown.
+Terminal continuations select Anthropic SSE parsing from the actual response content type even
+for a non-stream client. Both initial and continuation 413 paths refuse unchanged image resends.
 
 ## Stable images and overflow recovery
 
@@ -58,7 +63,8 @@ new unit or unverifiable owner fails explicitly; no finite API limit can admit e
 `src/server/responses/image-context-recovery.ts` dispatches the summary inside the original
 Responses owner. `src/server/responses/response-effects.ts` preserves Anthropic tools, system
 and normal tool choice. `src/responses/compaction-summary.ts` suppresses client tool events
-and rejects invalid summaries before checkpoint publication. Sidecar execution is bypassed.
+and rejects invalid summaries before checkpoint publication, including EOF without a normal stop
+reason. Successful summaries have no failure error code. Sidecar execution is bypassed.
 Hosted server tools are the exception: `tool_choice: none` prevents upstream execution, at
 the documented cost of invalidating the Messages cache when choice changes.
 

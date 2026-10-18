@@ -1,5 +1,4 @@
 import type { OcxContext, OcxMessage, OcxParsedRequest, OcxProviderContinuationOwner } from "../../types";
-import { createHash } from "node:crypto";
 import type { ProviderAdapter, IncomingMeta } from "../../adapters/base";
 import { AnthropicImageOverflow } from "../../adapters/anthropic-image-guard";
 import { sameProviderContinuationOwner } from "../../responses/provider-continuation";
@@ -24,7 +23,7 @@ const summaryInstruction = (): OcxMessage => ({ role: "user", timestamp: 0,
 const messageKey = ({ timestamp: _timestamp, ...message }: OcxMessage): string => JSON.stringify(message);
 
 function prefixDigest(messages: OcxMessage[], end: number): string {
-  const digest = createHash("sha256");
+  const digest = new Bun.CryptoHasher("sha256");
   for (let i = 0; i < end; i++) digest.update(messageKey(messages[i])).update("\n");
   return digest.digest("hex");
 }

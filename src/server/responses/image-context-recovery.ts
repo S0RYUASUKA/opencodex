@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import type { ResponsesRequestContext, ResponsesDispatchers } from "./core-options";
 import type { PreparedResponsesRequest } from "./request-prepare";
 import type { ResponsesTransport } from "./request-transport";
@@ -41,6 +40,7 @@ export function createImageContextPreparation(
           const childLog: RequestLogContext = { model: requestState.route.modelId, provider: requestState.route.providerName,
             conversationId: logCtx.conversationId };
           let status = 502;
+          let succeeded = false;
           try {
             const child = new Request(req.url, { method: "POST", headers, body: JSON.stringify(body), signal: options.abortSignal });
             const response = await dispatchers.handleResponses(child, config, childLog, {
@@ -62,10 +62,11 @@ export function createImageContextPreparation(
               status = response.ok ? 502 : response.status;
               throw new ImageContextError("Image compaction failed to return a completed text-only summary.", status);
             }
+            succeeded = true;
             return text;
           } finally {
-            childLog.errorCode ??= "image_compaction_summary";
-            addFinalRequestLog(`ocx-${randomUUID().replaceAll("-", "")}`, started, childLog, status);
+            if (!succeeded) childLog.errorCode ??= "image_compaction_summary";
+            addFinalRequestLog(`ocx-${crypto.randomUUID().replaceAll("-", "")}`, started, childLog, status);
           }
         },
       });

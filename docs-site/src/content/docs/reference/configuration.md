@@ -40,13 +40,19 @@ with zero output tokens. Renewal stops when the turn ends or its running state i
 
 Renewal is billable at the provider's cache-read rates. Failed or cancelled sends can still
 incur charges; renewal cannot guarantee a hit during outages or after expiry. Reliable local
-IPC is required, with a native rollout/writer-lock fallback currently limited to Windows.
+IPC is required. Renewal currently supports Windows only: the default IPC endpoint and native
+rollout/writer-lock fallback do not resolve macOS or Linux runtime ownership. A configured
+`spend.root.maxTokens`, `spend.identity.maxTokens` or `spend.pool.maxTokens` disables renewal;
+detached renewal does not yet participate in workflow spend reservations. Empty spend scopes
+and retention-only accounting do not disable it. Natural requests retain normal spend admission.
 This setting has no dedicated dashboard control and does not change native Codex.
 
 Anthropic image history keeps stable encodings. When the aggregate image or complete request
 limit is reached, the Responses bridge summarizes old history and continues with the newest
 image and its paired tool results. An individually oversized latest input still needs to be
-reduced. Summary calls are also billed normally; no tools execute during summarization.
+reduced. Requests without a verified conversation and serving owner fail explicitly on overflow
+rather than silently deleting old images. Summary calls are also billed normally; no tools execute
+during summarization. An EOF without a normal completion reason cannot publish a summary checkpoint.
 
 ### Provider and model aliases
 

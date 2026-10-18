@@ -376,7 +376,7 @@ describe("normalizeAnthropicImages — guards and seams", () => {
     for (const b of content) sum += b.source?.data?.length ?? 0;
     expect(sum).toBeGreaterThan(TOTAL_IMAGE_BASE64_BUDGET);
     const before = JSON.stringify(messages);
-    expect(() => assertAnthropicImageBudget(messages)).toThrow();
+    expect(() => assertAnthropicImageBudget(messages, Buffer.byteLength(JSON.stringify(messages), "utf8"))).toThrow();
     expect(JSON.stringify(messages)).toBe(before);
   });
 
@@ -396,7 +396,7 @@ describe("normalizeAnthropicImages — guards and seams", () => {
     expect(sum).toBeGreaterThan(TOTAL_IMAGE_BASE64_BUDGET);
     expect(content[0].source?.data?.length).toBe(TIER_SPECS[0].hardCap);
     expect(content.every(block => block.source?.data === content[0].source?.data)).toBe(true);
-    expect(() => assertAnthropicImageBudget(messages)).toThrow();
+    expect(() => assertAnthropicImageBudget(messages, Buffer.byteLength(JSON.stringify(messages), "utf8"))).toThrow();
   });
 
   test("activation both directions: with normalization the guard keeps every image; without it Rule 4 drops", async () => {

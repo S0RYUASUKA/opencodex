@@ -25,6 +25,12 @@ export interface NaturalCacheScope {
 
 export type PinnedRenewalSend = (url: string, headers: Headers, body: string, signal: AbortSignal, dispatched: () => void) => Promise<Response>;
 
+function renewalConfigAllowed(config: OcxConfig): boolean {
+  // Detached renewals cannot reserve the original workflow's spend scopes yet.
+  return config.anthropicCacheRenewal === true
+    && ![config.spend?.root, config.spend?.identity, config.spend?.pool].some(scope => scope?.maxTokens !== undefined);
+}
+
 // Diagnostic correlation is process-local evidence, never an input to cache or task identity.
 function naturalDiagnostic(scope: { observationId?: string; threadId?: string; turnId?: string; role?: string; purpose?: string },
   phase: "scope" | "response" | "usage", reason: string, usage?: unknown, comparison?: CachePrefixComparison): void {
@@ -47,7 +53,7 @@ export function naturalCacheScope(input: {
   adapterName: string; providerName: string; oauth: boolean; conversationId?: string;
 }): NaturalCacheScope | undefined {
   const { parsed, req, options } = input;
-  if (input.adapterName !== "anthropic" || input.config.anthropicCacheRenewal !== true) return;
+  if (input.adapterName !== "anthropic" || !renewalConfigAllowed(input.config)) return;
   const diagnostic = { observationId: randomUUID(), threadId: parsed._codexOwnThreadId };
   if (!parsed._codexOwnThreadId) { naturalDiagnostic(diagnostic, "scope", "missing-own-thread"); return; }
   const turn = codexRequestTurn(parsed._rawBody, req.headers);
@@ -91,7 +97,7 @@ export async function observeNaturalCacheSend(
 ): Promise<Response> {
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
   const original = typeof init.body === "string" ? init.body : undefined;
-  if (!original || !renewalBody(original) || scope.config.cacheRetention === "none" || scope.config.anthropicCacheRenewal !== true) {
+  if (!original || !renewalBody(original) || scope.config.cacheRetention === "none" || !renewalConfigAllowed(scope.config)) {
     naturalDiagnostic(scope, "response", scope.config.cacheRetention === "none" ? "cache-disabled" : "ineligible-body");
     manager.forget(scope.threadId);
     return physical(input, init);
@@ -104,7 +110,7 @@ export async function observeNaturalCacheSend(
   const credential = headers.get("authorization") ?? headers.get("x-api-key") ?? "";
   const identity = JSON.stringify([scope.provider, url, parsed.model, credential, headers.get("anthropic-organization-id")]);
   const allowed = () => {
-    if (scope.config.cacheRetention === "none" || scope.config.anthropicCacheRenewal !== true) return false;
+    if (scope.config.cacheRetention === "none" || !renewalConfigAllowed(scope.config)) return false;
     if (!scope.oauth) return true;
     const token = headers.get("authorization")?.replace(/^Bearer\s+/i, "");
     return !!token && !!getAccountSet(scope.provider)?.accounts.some(row => row.credential.access === token && !row.paused && !row.needsReauth);

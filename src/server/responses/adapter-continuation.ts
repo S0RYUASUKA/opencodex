@@ -681,7 +681,7 @@ export function createAdapterContinuations(
         }
       }
       }
-      if (shouldAttemptImageTierRetry({
+      if (transportState.activeAdapter.name !== "anthropic" && shouldAttemptImageTierRetry({
         status: response.status,
         adapterName: transportState.activeAdapter.name,
         parsed: nextParsed,
@@ -726,7 +726,8 @@ export function createAdapterContinuations(
       const parse = async function* (current: Response): AsyncGenerator<AdapterEvent> {
         if (!current.ok) {
           yield await adapterExchange.thinkingSignatureRecovery.projectHttpFailure(current, upstream.signal);
-        } else if (nextParsed.stream) {
+        } else if (nextParsed.stream || (transportState.activeAdapter.name === "anthropic"
+          && current.headers.get("content-type")?.includes("text/event-stream") === true)) {
           yield* readResponseStreamWithInactivity(current, upstream.signal, bodyInactivityMs,
             guarded => transportState.activeAdapter.parseStream(guarded, translatorBudget, logCtx.activeTierMetadata));
         } else if (transportState.activeAdapter.parseResponse) {
