@@ -9,6 +9,7 @@ runtime state and usage logging. This does not change native Codex or native Mes
 The optional top-level `anthropicCacheRenewal` boolean defaults off. Only explicit `true`
 enables background sends; existing `cacheRetention` choices remain authoritative. One-hour,
 disabled, externally controlled or incompatible cache requests do not opt into renewal.
+First-party Anthropic now defaults omitted retention to one hour; select `cacheRetention: "short"` explicitly to use five-minute renewal.
 Configured root, identity or pool spend ceilings disable renewal, including a ceiling added after
 confirmation. Detached renewals do not yet reserve their original workflow scopes. Empty spend
 scopes and retention-only accounting stay observational; normal sends retain existing admission.

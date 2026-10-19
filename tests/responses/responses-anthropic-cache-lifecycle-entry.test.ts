@@ -122,14 +122,15 @@ function config(retention = "short"): any { return { defaultProvider: "anthropic
   webSearchSidecar: { enabled: true, backend: "exa", exaApiKey: "offline-only-not-a-key" },
   providers: { anthropic: { baseUrl: "https://api.anthropic.com", apiKey: "offline-only-not-a-key", adapter: "anthropic", authMode: "oauth", models: ["claude-opus-5-5"] } } }; }
 
-for (const enabled of [undefined, false, true]) for (const retention of ["short", "long", "none"]) {
+for (const enabled of [undefined, false, true]) for (const retention of [undefined, "short", "long", "none"]) {
   if (enabled === true && retention === "short") continue;
   test(`renewal preserves the opt-in and configured TTL: enabled=${enabled}, retention=${retention}`, async () => {
     const cfg = config(retention); cfg.anthropicCacheRenewal = enabled;
+    if (retention === undefined) delete cfg.cacheRetention;
     const { response } = await invoke("main", "http", false, cfg); await response.text();
     await clock.advance(900000);
     expect(sent).toHaveLength(1); expect(listeners.size).toBe(0);
-    expect(sent[0].body.cache_control?.ttl).toBe(retention === "long" ? "1h" : undefined);
+    expect(sent[0].body.cache_control?.ttl).toBe(retention === undefined || retention === "long" ? "1h" : undefined);
   });
 }
 function request(role = "main", entry = "http", stream = false) {
