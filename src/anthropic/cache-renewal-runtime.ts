@@ -8,10 +8,8 @@ import { CodexCacheRuntime } from "../codex/cache-runtime-state";
 import { AnthropicCacheRenewal, cacheUsage, renewalBody, type CachePrefixComparison, type RenewalResult, type RenewalWire } from "./cache-renewal";
 import { attachCacheObservation } from "../lib/anthropic-cache-observation";
 
-export const NATURAL_CACHE_SCOPE = Symbol("anthropic-natural-cache-scope");
-export const RENEWAL_DISPATCH = Symbol("anthropic-cache-renewal-dispatch");
-
 export interface NaturalCacheScope {
+  observeSend: typeof observeNaturalCacheSend;
   observationId?: string;
   threadId: string;
   turnId: string;
@@ -69,7 +67,7 @@ export function naturalCacheScope(input: {
     naturalDiagnostic({ ...diagnostic, ...turn, ...origin }, "scope", "ineligible-provenance"); return;
   }
   naturalDiagnostic({ ...diagnostic, ...turn, ...origin }, "scope", "eligible");
-  return { ...turn, observationId: diagnostic.observationId, role: origin.role, purpose: origin.purpose as "turn" | "compaction", provider: input.providerName, config: input.config,
+  return { ...turn, observeSend: observeNaturalCacheSend, observationId: diagnostic.observationId, role: origin.role, purpose: origin.purpose as "turn" | "compaction", provider: input.providerName, config: input.config,
     oauth: input.oauth, conversationId: input.conversationId };
 }
 

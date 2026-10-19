@@ -3,6 +3,8 @@
 `src/anthropic/cache-renewal.ts` owns confirmed five-minute prompt prefixes and their renewal
 clock. `src/anthropic/cache-renewal-runtime.ts` binds that owner to Responses transport, Codex
 runtime state and usage logging. This does not change native Codex or native Messages passthrough.
+The request owner supplies its observation callback to `src/server/responses/fetch-helpers.ts`;
+the transport invokes it at the final send without importing the renewal runtime or starting watchers.
 
 ## Running-turn renewal
 
