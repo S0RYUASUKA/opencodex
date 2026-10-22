@@ -47,12 +47,16 @@ detached renewal does not yet participate in workflow spend reservations. Empty 
 and retention-only accounting do not disable it. Natural requests retain normal spend admission.
 This setting has no dedicated dashboard control and does not change native Codex.
 
-Anthropic image history keeps stable encodings. When the aggregate image or complete request
-limit is reached, the Responses bridge summarizes old history and continues with the newest
+Anthropic image history keeps stable encodings. The aggregate image allowance is **26 MiB**.
+When the local image or complete request limit is reached, the Responses bridge summarizes old history and continues with the newest
 image and its paired tool results. An individually oversized latest input still needs to be
 reduced. Requests without a verified conversation and serving owner fail explicitly on overflow
 rather than silently deleting old images. Summary calls are also billed normally; no tools execute
 during summarization. An EOF without a normal completion reason cannot publish a summary checkpoint.
+If an upstream returns HTTP 413 for an image-bearing history with compactable old images,
+the same request can summarize that old prefix and retry once. Another refusal stays terminal.
+Image-free requests do not enter this recovery. Native Messages retains its original processing
+policy with the explicitly increased 26 MiB allowance.
 
 ### Provider and model aliases
 

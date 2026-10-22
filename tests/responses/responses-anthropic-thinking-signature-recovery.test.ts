@@ -83,7 +83,7 @@ function config(): OcxConfig {
 function request(stream: boolean, threadId = "thinking-recovery-thread", signed = true): Request {
   return new Request("http://localhost/v1/responses", {
     method: "POST",
-    headers: { "content-type": "application/json", "x-codex-parent-thread-id": threadId, "thread-id": threadId },
+    headers: { "content-type": "application/json", "x-codex-parent-thread-id": threadId },
     body: JSON.stringify({
       model: "anthropic-test/claude-sonnet-4-5", stream, store: false,
       tools: [{ type: "function", name: "lookup", parameters: { type: "object", properties: {} } }],

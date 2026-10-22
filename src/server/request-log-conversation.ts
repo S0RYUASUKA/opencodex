@@ -140,22 +140,22 @@ function firstSanitizedConversationId(
 
 /**
  * Conversation namespace for reasoning replay. Unlike the persisted log id, this stays the raw
- * sanitized own-thread identity. A parent groups siblings for logging, but cannot own their
- * reasoning provenance. Without a child identity, leave parent-scoped requests unbound by default.
- * Legacy Responses callers may opt into parent-only replay; this never supplies a renewal identity.
+ * sanitized identity so mixed headers that carry the same conversation still hit one serving
+ * record. Do not hash, and do not prefer session_id over a true per-conversation thread/Cursor
+ * identity: session_id can be synthesized from a shared prompt_cache_key.
  */
 export function reasoningReplayConversationIdFromResponsesRequest(input: {
   clientThreadId?: string;
   threadIdHeader?: string | null;
   cursorConversationId?: string;
   sessionIdHeader?: string | null;
-  allowParentThreadFallback?: boolean;
 }): string | undefined {
-  const own = firstSanitizedConversationId(input.threadIdHeader, input.cursorConversationId);
-  if (own) return own;
-  const parent = firstSanitizedConversationId(input.clientThreadId);
-  if (parent) return input.allowParentThreadFallback ? parent : undefined;
-  return firstSanitizedConversationId(input.sessionIdHeader);
+  return firstSanitizedConversationId(
+    input.clientThreadId,
+    input.threadIdHeader,
+    input.cursorConversationId,
+    input.sessionIdHeader,
+  );
 }
 
 export function conversationIdFromResponsesRequest(input: {

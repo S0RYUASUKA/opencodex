@@ -29,8 +29,7 @@ the unsent repair uncharged. Recovery preserves the original thinking classifica
 
 Only a delivery-validated completed response with actual text/tool output and an observed
 successful terminal can memoize the rejection. Errors, incomplete/empty responses, missing
-terminals, cancellation and changed serving identity cannot memoize it. Parent-only Codex provenance
-may recover the current refusal but cannot publish a memo shared by unidentified children. The existing thread and
+terminals, cancellation and changed serving identity cannot memoize it. The existing thread and
 durable-serving-identity key and five-minute TTL in `src/responses/reasoning-replay-cache.ts` are
 unchanged. Selective memos retain at most 256 payload digests within the existing cache byte cap;
 merged sets that cannot fit fall back to the existing blanket policy. `src/server/responses/core-replay.ts`

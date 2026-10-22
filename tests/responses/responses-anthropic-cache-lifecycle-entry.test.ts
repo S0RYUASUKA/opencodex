@@ -56,6 +56,8 @@ const cache = new Map<string, number>();
 let hold = false, finishStream: (() => void) | undefined, coldWarm = false;
 let hangRenewal = false, deferNatural = false, releaseNatural: (() => void) | undefined;
 let emptyNatural = false, terminalNatural = false, refuseContinuation = false;
+let refuseImages: "once" | "always" | undefined;
+let cancelImageRefusal: AbortController | undefined, invalidImageSummary = false;
 const encoder = new TextEncoder();
 function frame(event: string, data: any) { return encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); }
 globalThis.fetch = (async (url: any, init: any) => {
@@ -71,6 +73,15 @@ globalThis.fetch = (async (url: any, init: any) => {
     return Response.json({ id: "msg_warm", type: "message", model: body.model, content: [], stop_reason: "max_tokens", usage });
   }
   if (refuseContinuation && !emptyNatural) return new Response("request too large", { status: 413 });
+  if (invalidImageSummary && JSON.stringify(body.messages.at(-1)).includes("Return only the handoff summary")) {
+    return Response.json({ content: [], stop_reason: "end_turn", usage });
+  }
+  if (refuseImages && JSON.stringify(body.messages).includes('"type":"image"')
+    && !JSON.stringify(body.messages.at(-1)).includes("Return only the handoff summary")) {
+    if (refuseImages === "once") refuseImages = undefined;
+    cancelImageRefusal?.abort();
+    return Response.json({ error: { type: "request_too_large", message: "image fixture exceeds request limit" } }, { status: 413 });
+  }
   if (emptyNatural) {
     emptyNatural = false;
     const empty = { id: "msg_empty", type: "message", model: body.model, content: [], stop_reason: "end_turn", usage };
@@ -116,6 +127,7 @@ afterAll(() => {
 });
 beforeEach(() => { stopAnthropicCacheRenewal(); clock.jobs.clear(); clock.now = 0; sent.length = 0; cache.clear(); hold = false; finishStream = undefined; coldWarm = false;
   hangRenewal = deferNatural = emptyNatural = terminalNatural = refuseContinuation = false; releaseNatural = undefined; });
+beforeEach(() => { refuseImages = undefined; cancelImageRefusal = undefined; invalidImageSummary = false; });
 
 function config(retention = "short"): any { return { defaultProvider: "anthropic", cacheRetention: retention,
   anthropicCacheRenewal: true, multiAgentGuidanceEnabled: false,
@@ -527,3 +539,62 @@ test("来源对象不写入用量JSONL，单个请求只有一条关联记录", 
   expect(getRequestLogEntries().at(-1).requestOriginDiagnostic).toBeUndefined();
   expect(disk.at(-1).requestId).toBe(logId);
 });
+
+async function imageRecoveryRequest(stream = false) {
+  const r = request("main", "http", stream), raw = await r.req.json();
+  const own = randomUUID(); r.req.headers.set("thread-id", own); raw.client_metadata.thread_id = own;
+  const image = { type: "input_image", image_url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2G0AAAAAASUVORK5CYII=" };
+  raw.input = [{ role: "user", content: [{ type: "input_text", text: "Old image." }, image] },
+    { role: "assistant", content: "Old image inspected." }, { role: "user", content: [{ type: "input_text", text: "Inspect newest image." }, image] }];
+  return { r, raw };
+}
+
+for (const enabled of [false, true]) for (const stream of [false, true]) for (const search of [false, true, "media"] as const) {
+  if (search === "media" && !stream) continue;
+  test(`上游图片413在同轮压缩后继续，renewal=${enabled}, stream=${stream}, search=${search}`, async () => {
+    refuseImages = "once";
+    const cfg = config(); cfg.anthropicCacheRenewal = enabled; cfg.webSearchSidecar.enabled = search === true;
+    cfg.providers.anthropic.requestPacing = { enabled: true, maxConcurrentRequests: 1 };
+    const { r, raw } = await imageRecoveryRequest(stream);
+    if (search !== true) raw.tools = raw.tools.filter((tool: any) => tool.type !== "web_search");
+    if (search === "media") {
+      raw.tools.push({ type: "image_generation" }); cfg.images = { bridgeEnabled: true };
+      cfg.providers.xai = { adapter: "openai-chat", baseUrl: "https://api.x.ai/v1", authMode: "key", apiKey: "offline-only-not-a-key", proxy: "direct" };
+    }
+    const response = await handleResponses(new Request(r.req.url, { method: "POST", headers: r.req.headers, body: JSON.stringify(raw) }), cfg,
+      { model: "", provider: "" } as any, { ...r.options, abortSignal: AbortSignal.timeout(5000) });
+    const text = await response.text();
+    expect(response.ok).toBe(true); expect(text).toContain("Fixture summary."); expect(text).not.toContain("response.failed");
+    expect(sent).toHaveLength(3);
+    expect(sent[2].body.tools).toEqual(sent[0].body.tools); expect(sent[2].body.system).toEqual(sent[0].body.system);
+    expect(JSON.stringify(sent[2].body.messages)).toContain("Inspect newest image.");
+    expect(sent[2].body.messages.flatMap((m: any) => Array.isArray(m.content) ? m.content : []).filter((p: any) => p.type === "image")).toHaveLength(1);
+    expect(denied).toBe(0);
+  });
+}
+
+for (const scenario of ["second-413", "text-only", "budget", "cancelled", "invalid-summary", "checkpoint-replay"] as const) {
+  test(`上游图片413恢复边界 ${scenario}`, async () => {
+    refuseImages = scenario === "second-413" ? "always" : "once";
+    const cfg = config(); cfg.anthropicCacheRenewal = false; cfg.webSearchSidecar.enabled = false; cfg.emptyCompletionRetry = false;
+    const { r, raw } = await imageRecoveryRequest(); raw.tools = raw.tools.filter((tool: any) => tool.type !== "web_search");
+    const options: any = { ...r.options, abortSignal: AbortSignal.timeout(5000) };
+    if (scenario === "text-only") { refuseContinuation = true; raw.input = [{ role: "user", content: "Only text." }]; }
+    if (scenario === "budget") {
+      const { createRequestExecutionBudget, CODEX_TEXT_GUARDED_BUDGET_POLICY } = await import(`${source}/src/lib/request-execution-budget.ts`);
+      options.sendBudget = createRequestExecutionBudget({ ...CODEX_TEXT_GUARDED_BUDGET_POLICY, maxTotalModelSends: 1, baseSendAllowance: 1, finalRecoveryAllowance: 0 });
+    }
+    if (scenario === "cancelled") { cancelImageRefusal = new AbortController(); options.abortSignal = cancelImageRefusal.signal; }
+    if (scenario === "invalid-summary") invalidImageSummary = true;
+    const send = () => handleResponses(new Request(r.req.url, { method: "POST", headers: r.req.headers, body: JSON.stringify(raw) }), cfg,
+      { model: "", provider: "" } as any, options);
+    const response = await send(); await response.text();
+    expect(response.status).toBe(scenario === "cancelled" ? 499 : scenario === "invalid-summary" ? 502 : scenario === "checkpoint-replay" ? 200 : 413);
+    expect(sent).toHaveLength(scenario === "second-413" || scenario === "checkpoint-replay" ? 3 : scenario === "invalid-summary" ? 2 : 1);
+    if (scenario === "checkpoint-replay") {
+      const previous = sent.at(-1).body; const next = await send(); await next.text();
+      expect(next.status).toBe(200); expect(sent).toHaveLength(4); expect(sent.at(-1).body).toEqual(previous);
+    }
+    expect(denied).toBe(0);
+  });
+}

@@ -55,6 +55,7 @@ import { isAntigravityRawValidationRefusal } from "./antigravity-validation-refu
 import { createSidecarSendBudget } from "./sidecar-send-budget";
 import { naturalCacheScope } from "../../anthropic/cache-renewal-runtime";
 import { stripReplayedSearchPairs } from "../../web-search/sidecar-search-replay";
+import { recoverImageContextResponse, type ImageContextPreparation } from "./image-context-recovery";
 
 /** One responsibility of the Responses request pipeline; state owners are explicit. */
 export async function executeResponsesSidecars(
@@ -101,7 +102,7 @@ export async function executeResponsesSidecars(
     | "cancelResponseCompletion"
   >,
   sendBudgetState: Pick<ResponsesSendBudget, "sendBudgetExhausted" | "reserveCredentialHop" | "refundableAdapterDispatchBudget" | "adapterDispatchBudget" | "noteInitialDispatch" | "noteAdapterPhysicalSend" | "noteAdapterRecoveryWithheld" | "pendingHopPermit">,
-  prepareImageContext?: () => Promise<Response | undefined>,
+  prepareImageContext?: ImageContextPreparation,
 ) {
   const { config, options, logCtx } = requestContext;
   const antigravityPoolActivated = requestState.route.providerName === "google-antigravity"
@@ -127,6 +128,9 @@ export async function executeResponsesSidecars(
   const { routedCompaction, preserveCompactionPrefix, openAiSidecar } = sidecarState;
   const { reserveCredentialHop } = sendBudgetState;
   const sidecarBudget = createSidecarSendBudget(options, sendBudgetState, () => logCtx.usageLogInputTokens);
+  const recoverImageContext = prepareImageContext ? (response: Response, attempt: OcxParsedRequest, adapter: ProviderAdapter, signal: AbortSignal) =>
+    sendBudgetState.sendBudgetExhausted() ? Promise.resolve({ response, changed: false })
+      : recoverImageContextResponse(response, attempt, adapter, prepareImageContext, signal) : undefined;
   // These executors send the routed primary model; search/media helper sends own separate policy.
   const primaryFetchOptions = (adapter: ProviderAdapter, requestParsed = parsed) => ({
     ...sidecarBudget.fetchOptions(adapter),
@@ -531,6 +535,7 @@ export async function executeResponsesSidecars(
       { providerName: route.providerName, modelId: route.modelId, ...primaryFetchOptions(transportState.adapter) },
     );
     const imgLoopResponse = await runWithImageBridge({
+      recoverImageContext,
       parsed, adapter: transportState.adapter,
       ...(transportState.adapter.name === "anthropic" ? { thinkingRecovery } : {}),
       clientToolCatalogRestriction: route.provider.authMode === "forward" ? undefined : requestState.clientToolCatalogRestriction,
@@ -635,6 +640,7 @@ export async function executeResponsesSidecars(
         ...primaryFetchOptions(transportState.adapter),
       })(input, init)) as typeof globalThis.fetch;
     const loopResponse = await runWithWebSearch({
+      recoverImageContext,
       parsed, adapter: transportState.adapter,
       ...(transportState.adapter.name === "anthropic" ? { thinkingRecovery } : {}),
       clientToolCatalogRestriction: route.provider.authMode === "forward" ? undefined : requestState.clientToolCatalogRestriction,

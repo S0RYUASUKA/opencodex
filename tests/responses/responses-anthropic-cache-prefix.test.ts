@@ -1,8 +1,6 @@
 import { test, expect } from "bun:test";
 import { repoRoot } from "../helpers/repo-root";
 const root = repoRoot();
-const replay = await import(`${root}/src/responses/reasoning-replay-cache.ts`);
-const ids = await import(`${root}/src/server/request-log-conversation.ts`);
 const cache = await import(`${root}/src/anthropic/cache-renewal.ts`);
 const { createResponsesEffects } = await import(`${root}/src/server/responses/response-effects.ts`);
 const { guardCompactionSummary } = await import(`${root}/src/responses/compaction-summary.ts`);
@@ -17,9 +15,6 @@ test("an optional cache observer failure never breaks a natural response", () =>
   expect(() => observations.observeAnthropicCacheUsage(wrapped, {})).not.toThrow();
   expect(calls).toBe(1);
 });
-const identity = (model: string) => ({ providerName: model, providerDestinationIdentity: model,
-  providerDestinationDurableIdentity: model, adapterName: model, modelId: model,
-  credentialIdentity: "offline", credentialDurableIdentity: "offline" });
 const cc = { type: "ephemeral" };
 const wire = (body: any, identity = "one", turnId = "turn") => ({ identity, turnId, model: "claude",
   body: JSON.stringify(body), allowed: () => true, send: async () => { throw new Error("must-not-send"); }, record() {} });
@@ -39,24 +34,6 @@ const append = (base = before()) => {
 };
 const strip = (value: any) => JSON.stringify(value, (key, item) => key === "cache_control" ? undefined : item);
 
-test("异模型子完成不改变主代理身份，真实主换模型仍被识别", () => {
-  const parentId = "offline-parent", childId = "offline-child";
-  const parent: any = { clientThreadId: ids.reasoningReplayConversationIdFromResponsesRequest({ threadIdHeader: parentId }) };
-  const child: any = { clientThreadId: ids.reasoningReplayConversationIdFromResponsesRequest({ clientThreadId: parentId, threadIdHeader: childId }) };
-  replay.bindReasoningReplayScope(parent, identity("anthropic"));
-  replay.bindReasoningReplayScope(child, identity("gemini"));
-  replay.commitReasoningReplayServingIdentity(parent);
-  replay.commitReasoningReplayServingIdentity(child);
-  expect(child.clientThreadId).toBe(childId);
-  expect(replay.reasoningReplayServingIdentityChanged(parent)).toBe(false);
-  replay.bindReasoningReplayScope(parent, identity("different-backend"));
-  expect(replay.reasoningReplayServingIdentityChanged(parent)).toBe(true);
-});
-test("父ID不能在缺失自身身份时合并子代理，独立客户端保留session后备", () => {
-  expect(ids.reasoningReplayConversationIdFromResponsesRequest({ clientThreadId: "parent", sessionIdHeader: "shared" })).toBeUndefined();
-  expect(ids.reasoningReplayConversationIdFromResponsesRequest({ sessionIdHeader: "standalone" })).toBe("standalone");
-  expect(ids.reasoningReplayConversationIdFromResponsesRequest({ clientThreadId: "parent", cursorConversationId: "cursor" })).toBe("cursor");
-});
 test("追加22通知后仍保留已确认旧尾断点，工具正文和新通知不变", () => {
   const a = before(), b = append(a), old = wire(a), current = wire(b);
   const changed = JSON.parse(retain(old, current));

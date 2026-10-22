@@ -44,10 +44,8 @@ executes a tool or appends anything to client history. Diagnostic records correl
 ids with allowlisted thread/turn/role, phase, counters and fixed network reasons; they contain
 no prompt, image, credential or raw exception. `src/server/request-origin.ts` separately
 correlates natural request logs, keeping missing/conflicting provenance unknown.
-Responses ordinary and compact gateway requests explicitly retain legacy parent-only
-replay when no child id exists. Identified siblings still use their own ids. This compatibility
-exception does not bind a Codex own-thread identity or enable Anthropic renewal or image recovery.
-Parent-only Anthropic refusals cannot publish a cross-request stripped-history memo for unidentified siblings.
+Generic reasoning replay retains its existing identity and rejection-memo contracts. Renewal
+and image checkpoints use their independent own-thread identity; they do not change generic replay.
 Terminal continuations select Anthropic SSE parsing from the actual response content type even
 for a non-stream client. Both initial and continuation 413 paths refuse unchanged image resends.
 
@@ -59,8 +57,9 @@ Single-image validation and decoding protections remain in place. Native Message
 retain their legacy age tiers; they do not own Responses compaction. The actual Anthropic adapter
 uses the non-mutating assertion in `src/adapters/anthropic-image-guard.ts`: 26 MiB aggregate
 base64, the existing image-count/dimension limits, and 32,000,000 bytes for the complete
-serialized request, including system, tools and text. An upstream 413 is not retried with
-historical pictures degraded. The legacy mutating helper is not used by this adapter.
+serialized request, including system, tools and text. The 26 MiB allowance also applies to the
+legacy native Messages guard; its age tiers and mutating handling otherwise stay unchanged.
+An upstream 413 is never retried with historical pictures degraded.
 
 `src/server/responses/anthropic-image-context.ts` partitions history only at complete tool
 call/result boundaries. Image-free requests skip this preflight rather than building a second
@@ -68,6 +67,12 @@ request or touching continuation-owner state. On local overflow it summarizes th
 retains the newest indivisible unit, including the latest image. Recovery repeats only while
 the same admission, cancellation and finite send budget allow it. An individually oversized
 new unit or unverifiable owner fails explicitly; no finite API limit can admit every image.
+An upstream image 413 can compact an old image-bearing complete prefix once before retrying
+the current send. The refused body releases its pacing lease before the summary is admitted.
+Ordinary dispatch, search and media loops share this request-owned recovery; loop histories
+adopt the summary without replaying completed tools. Repeated 413, image-free input or a newest
+indivisible unit without compactable old images does not start another summary. Original send
+budgets, cancellation and serving-owner checks remain authoritative.
 
 `src/server/responses/image-context-recovery.ts` dispatches the summary inside the original
 Responses owner. `src/server/responses/response-effects.ts` preserves Anthropic tools, system

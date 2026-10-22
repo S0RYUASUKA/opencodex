@@ -6,6 +6,25 @@ import { sameProviderContinuationOwner } from "../../responses/provider-continua
 import { decodeCompactionSummary } from "../../responses/compaction";
 import { addFinalRequestLog, type RequestLogContext } from "../request-log";
 import { formatErrorResponse } from "../../bridge";
+import type { OcxParsedRequest } from "../../types";
+import type { ProviderAdapter } from "../../adapters/base";
+import { readDisplaySafeErrorText } from "./core-errors";
+import { isNonReplayableResponse } from "../../lib/upstream-retry";
+
+export type ImageContextPreparation = (upstreamRejected?: boolean, attempt?: OcxParsedRequest, adapter?: ProviderAdapter) => Promise<Response | undefined>;
+
+/** Release the refused send before admitting its summary; retain the original terminal failure. */
+export async function recoverImageContextResponse(response: Response, parsed: OcxParsedRequest, adapter: ProviderAdapter,
+  prepare: ImageContextPreparation, signal: AbortSignal): Promise<{ response: Response; changed: boolean }> {
+  if (response.status !== 413 || adapter.name !== "anthropic" || isNonReplayableResponse(response)
+    || !parsed.context.messages.some(m => Array.isArray(m.content) && m.content.some(p => p.type === "image"))) return { response, changed: false };
+  const text = await readDisplaySafeErrorText(response, signal, "");
+  const headers = new Headers(response.headers); headers.delete("content-length"); headers.delete("content-encoding");
+  const retained = new Response(text, { status: response.status, headers });
+  const before = parsed.context.messages;
+  const refusal = await prepare(true, parsed, adapter);
+  return { response: refusal ?? retained, changed: !refusal && parsed.context.messages !== before };
+}
 
 /** Keep image recovery inside the owning request's admission, cancellation and send budget. */
 export function createImageContextPreparation(
@@ -13,7 +32,7 @@ export function createImageContextPreparation(
   requestState: PreparedResponsesRequest,
   transportState: ResponsesTransport,
   dispatchers: ResponsesDispatchers,
-): Response | (() => Promise<Response | undefined>) {
+): Response | ImageContextPreparation {
   const summaryContext = options.imageSummaryContext;
   if (summaryContext) {
     if (!requestState.parsed._providerContinuationOwner
@@ -23,10 +42,10 @@ export function createImageContextPreparation(
     requestState.parsed.context.messages = summaryContext.messages;
     requestState.parsed._anthropicImageOwner = summaryContext.owner;
   }
-  return async () => {
-    if (summaryContext || transportState.adapter.name !== "anthropic") return;
+  return async (upstreamRejected = false, attempt = requestState.parsed, adapter = transportState.activeAdapter ?? transportState.adapter) => {
+    if (summaryContext || adapter.name !== "anthropic" || upstreamRejected && attempt._compactionRequest) return;
     try {
-      await prepareAnthropicImageContext({ parsed: requestState.parsed, adapter: transportState.adapter,
+      await prepareAnthropicImageContext({ parsed: attempt, adapter, upstreamRejected,
         incoming: { headers: requestState.selectedForwardHeaders, providerName: requestState.route.providerName,
           translatorBudget: options.translatorBudget, abortSignal: options.abortSignal },
         async summarize(context) {

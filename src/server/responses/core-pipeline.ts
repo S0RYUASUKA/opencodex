@@ -108,6 +108,7 @@ export async function handleResponsesInner(
         transportState,
         responseEffects,
         sendBudgetState,
+        prepareImageContext,
       );
       if (adapterExchange instanceof Response) return adapterExchange;
       const continuationState = createAdapterContinuations(

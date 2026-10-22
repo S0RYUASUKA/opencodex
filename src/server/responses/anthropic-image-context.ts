@@ -46,6 +46,7 @@ export async function prepareAnthropicImageContext(input: {
   parsed: OcxParsedRequest;
   adapter: ProviderAdapter;
   incoming: IncomingMeta;
+  upstreamRejected?: boolean;
   summarize(context: ImageSummaryContext): Promise<string>;
 }): Promise<void> {
   const { parsed, adapter, incoming, summarize } = input;
@@ -97,7 +98,9 @@ export async function prepareAnthropicImageContext(input: {
     ];
     const cuts = completeBoundaries(original);
     const retainFrom = cuts.at(-1) ?? 0;
-    while (!await fits(effective(), false)) {
+    let rejected = input.upstreamRejected === true && original.slice(covered, retainFrom).some(message =>
+      Array.isArray(message.content) && message.content.some(part => part.type === "image"));
+    while (rejected || !await fits(effective(), false)) {
       if (!owner || !key) throw new ImageContextError("Image context cannot be compacted without a verified conversation and serving identity.");
       const candidates = cuts.filter(end => end > covered && end <= retainFrom);
       let lo = 0, hi = candidates.length - 1, end = covered;
@@ -116,6 +119,7 @@ export async function prepareAnthropicImageContext(input: {
       }
       summary = next;
       covered = end;
+      rejected = false;
       rememberResponseState({ input: [], store: false }, { id: key, output: [], status: "completed" }, {
         __ocxOwner: owner, anthropicImages: { covered, prefixDigest: prefixDigest(original, covered), summary },
       }, { force: true, clientThreadId: thread });

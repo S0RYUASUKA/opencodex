@@ -143,20 +143,20 @@ describe("conversationIdFromResponsesRequest", () => {
 describe("reasoningReplayConversationIdFromResponsesRequest", () => {
   test("keeps the raw identity instead of the hashed log id", () => {
     expect(reasoningReplayConversationIdFromResponsesRequest({
-      threadIdHeader: "own-thread",
-    })).toBe("own-thread");
+      clientThreadId: "parent-thread",
+    })).toBe("parent-thread");
     expect(reasoningReplayConversationIdFromResponsesRequest({
       sessionIdHeader: "session",
     })).not.toBe(digest32("session"));
   });
 
-  test("prefers own thread, then cursor, then standalone session; parent never owns replay", () => {
+  test("prefers parent thread, then thread-id, then cursor, then session_id", () => {
     expect(reasoningReplayConversationIdFromResponsesRequest({
       clientThreadId: "parent-thread",
       threadIdHeader: "thread",
       cursorConversationId: "cursor",
       sessionIdHeader: "session",
-    })).toBe("thread");
+    })).toBe("parent-thread");
     expect(reasoningReplayConversationIdFromResponsesRequest({
       threadIdHeader: "thread",
       cursorConversationId: "cursor",
@@ -169,16 +169,6 @@ describe("reasoningReplayConversationIdFromResponsesRequest", () => {
     expect(reasoningReplayConversationIdFromResponsesRequest({
       sessionIdHeader: "session",
     })).toBe("session");
-    expect(reasoningReplayConversationIdFromResponsesRequest({
-      clientThreadId: "parent-thread", sessionIdHeader: "shared-session",
-    })).toBeUndefined();
-  });
-
-  test("explicit legacy parent-only replay does not coalesce identified children", () => {
-    const legacy = { clientThreadId: "parent-thread", sessionIdHeader: "shared-session", allowParentThreadFallback: true };
-    expect(reasoningReplayConversationIdFromResponsesRequest(legacy)).toBe("parent-thread");
-    expect(reasoningReplayConversationIdFromResponsesRequest({ ...legacy, threadIdHeader: "child-a" })).toBe("child-a");
-    expect(reasoningReplayConversationIdFromResponsesRequest({ ...legacy, threadIdHeader: "child-b" })).toBe("child-b");
   });
 
   test("skips empty, control-bearing, and overlong fallbacks", () => {

@@ -118,6 +118,7 @@ import { isAntigravityValidationRefusal } from "./antigravity-validation-refusal
 import { unboundPoolSpendRefusalResponse } from "../workflow-refusal";
 import { AdmissionModelDeniedError, admissionModelDeniedResponse } from "../admission-model-scope";
 import { naturalCacheScope } from "../../anthropic/cache-renewal-runtime";
+import { recoverImageContextResponse, type ImageContextPreparation } from "./image-context-recovery";
 
 /** One responsibility of the Responses request pipeline; state owners are explicit. */
 export async function prepareAdapterExchange(
@@ -190,6 +191,7 @@ export async function prepareAdapterExchange(
     | "initialSendAllowance"
     | "noteInitialDispatch"
   >,
+  prepareImageContext?: ImageContextPreparation,
 ) {
   const { options, config, logCtx, req } = requestContext;
   const {
@@ -403,7 +405,9 @@ export async function prepareAdapterExchange(
   };
   const autoPauseEnabled = config.providers[route.providerName]?.accountAutoPause?.enabled === true;
   const billingPoolRequest = isAnthropicBillingKeyPool(route.provider);
-  const imageContextBudget = parsed._anthropicImageOwner !== undefined;
+  const imageContextBudget = parsed._anthropicImageOwner !== undefined || transportState.activeAdapter.name === "anthropic"
+    && !!prepareImageContext && parsed.context.messages.some(m => Array.isArray(m.content) && m.content.some(p => p.type === "image"));
+  let imageRecoveryAttempted = false;
   let billingRecoveryActive = false;
   const genericRefetchCountsSends = () => imageContextBudget || options.comboAttempt === true || sendBudgetState.adapterSendBudget?.spendEnforced === true
     || transientRetryPolicyFor(route.provider) !== null || resetReplayPolicyFor(route.provider) !== null
@@ -1780,6 +1784,18 @@ export async function prepareAdapterExchange(
       if (opaqueBlobRecovery.kind === "recovered") {
         upstreamResponse = opaqueBlobRecovery.response;
         continue recovery;
+      }
+      if (upstreamResponse.status === 413 && transportState.activeAdapter.name === "anthropic"
+        && !imageRecoveryAttempted && prepareImageContext && !sendBudgetExhausted()) {
+        imageRecoveryAttempted = true;
+        const recovered = await recoverImageContextResponse(upstreamResponse, parsed, transportState.activeAdapter, prepareImageContext, upstream.signal);
+        upstreamResponse = recovered.response;
+        if (recovered.changed) {
+          invalidateSameTargetRequest();
+          const result = await rebuildAndRefetch("image-413", undefined, upstreamResponse);
+          if ("failed" in result) return result.failed;
+          upstreamResponse = result; continue recovery;
+        }
       }
       // Console Go (opencode-zen / opencode-go) intermittently rejects a body it accepts seconds
       // later with 400 invalid_request_error / "Invalid upload request." Replay the
