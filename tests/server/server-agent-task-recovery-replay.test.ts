@@ -175,7 +175,8 @@ test.each([true, false, undefined])("fresh recovery and cache-only reparse prese
       const observed = observations[index]!;
       expect(observed.cohort).toBe(cohort);
       expect(observed.thread).toBe(parentThread);
-      expect(observed.replay).toMatchObject({ clientThreadId: parentThread });
+      expect(observed.replay).toMatchObject({ clientThreadId: "distinct-child-thread" });
+      expect(observed.replay!.clientThreadId).not.toBe(parentThread);
       expect(observed.replay).toEqual(observations[0]!.replay);
       for (const body of [observed.raw, providerBodies[index]!]) {
         expect(body).toContain("Read the affinity assignment.");

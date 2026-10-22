@@ -54,7 +54,9 @@ export function createAnthropicThinkingRecovery(
     guard.attempted = true;
     armed = true;
     const scope = parsed._reasoningReplayScope;
-    rejectedScope = scope ? { ...scope, current: scope.current ? { ...scope.current } : undefined } : undefined;
+    // A legacy parent-only replay namespace cannot identify which child was refused.
+    const parentOnly = parsed._clientThreadId && !parsed._codexOwnThreadId && !parsed._cursorConversationId;
+    rejectedScope = scope && !parentOnly ? { ...scope, current: scope.current ? { ...scope.current } : undefined } : undefined;
     if (!rejectedPayloads) {
       prepareOpaqueBlobRecovery(parsed);
       if (attempt !== parsed) prepareOpaqueBlobRecovery(attempt);

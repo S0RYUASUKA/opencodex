@@ -124,10 +124,11 @@ test("redacted-only history qualifies, and HTTP success alone does not memoize",
   expect(reasoningReplayOpaqueBlobRejectionMemoized(request._reasoningReplayScope)).toBe(true);
 });
 
-for (const variant of ["empty", "no-terminal", "error", "incomplete", "cancelled", "changed-identity", "changed-thread", "failed-fold"] as const) {
+for (const variant of ["empty", "no-terminal", "error", "incomplete", "cancelled", "changed-identity", "changed-thread", "failed-fold", "parent-only"] as const) {
   test(`does not memoize a ${variant} replacement`, async () => {
     const { recovery, request, abort } = fixture();
     const rejectedScope = structuredClone(request._reasoningReplayScope);
+    if (variant === "parent-only") request._clientThreadId = "shared-parent";
     const events: AdapterEvent[] = variant === "empty" ? [{ type: "done" }]
       : variant === "no-terminal" ? [success[0]!]
       : variant === "error" ? [success[0]!, rejection]

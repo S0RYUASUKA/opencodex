@@ -47,6 +47,7 @@ correlates natural request logs, keeping missing/conflicting provenance unknown.
 Responses ordinary and compact gateway requests explicitly retain legacy parent-only
 replay when no child id exists. Identified siblings still use their own ids. This compatibility
 exception does not bind a Codex own-thread identity or enable Anthropic renewal or image recovery.
+Parent-only Anthropic refusals cannot publish a cross-request stripped-history memo for unidentified siblings.
 Terminal continuations select Anthropic SSE parsing from the actual response content type even
 for a non-stream client. Both initial and continuation 413 paths refuse unchanged image resends.
 
