@@ -3,6 +3,7 @@
     "responses-anthropic-cache-prefix.test.ts": "responses",
     "responses-anthropic-cache-lifecycle-entry.test.ts": "responses",
     "codex-cache-runtime-record.test.ts": "codex-integration",
+    "service-proxy-env.test.ts": "service",
     "bridge-terminal-refusal.test.ts": "adapters",
     "loop-terminal-refusal.test.ts": "images",
     "web-search-terminal-refusal.test.ts": "web-search",
