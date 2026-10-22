@@ -51,14 +51,16 @@ for a non-stream client. Both initial and continuation 413 paths refuse unchange
 
 `src/adapters/anthropic-image-normalize.ts` chooses encoding from the image itself, not its age,
 aggregate pressure or retry number. A repeated image is deterministic even after cache eviction.
-Single-image validation and decoding protections remain in place. The actual Anthropic adapter
+Single-image validation and decoding protections remain in place. Native Messages lanes explicitly
+retain their legacy age tiers; they do not own Responses compaction. The actual Anthropic adapter
 uses the non-mutating assertion in `src/adapters/anthropic-image-guard.ts`: 26 MiB aggregate
 base64, the existing image-count/dimension limits, and 32,000,000 bytes for the complete
 serialized request, including system, tools and text. An upstream 413 is not retried with
 historical pictures degraded. The legacy mutating helper is not used by this adapter.
 
 `src/server/responses/anthropic-image-context.ts` partitions history only at complete tool
-call/result boundaries. On local overflow it summarizes the largest fitting old prefix and
+call/result boundaries. Image-free requests skip this preflight rather than building a second
+request or touching continuation-owner state. On local overflow it summarizes the largest fitting old prefix and
 retains the newest indivisible unit, including the latest image. Recovery repeats only while
 the same admission, cancellation and finite send budget allow it. An individually oversized
 new unit or unverifiable owner fails explicitly; no finite API limit can admit every image.

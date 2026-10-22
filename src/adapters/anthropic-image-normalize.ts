@@ -321,7 +321,7 @@ export async function normalizeImageTargets(targets: NormalizeTarget[], options:
  * Normalize every base64 image in already-built Anthropic wire messages (mutates in
  * place). URL-source images pass through untouched. See module header for the contract.
  */
-export async function normalizeAnthropicImages(messages: unknown[], options: NormalizeOptions = {}): Promise<void> {
+export async function normalizeAnthropicImages(messages: unknown[], options: NormalizeOptions & { stablePerImage?: boolean } = {}): Promise<void> {
   const refs = collectImageRefs(messages);
   if (refs.length === 0) return;
   const targets: NormalizeTarget[] = refs.map(ref => ({
@@ -330,6 +330,7 @@ export async function normalizeAnthropicImages(messages: unknown[], options: Nor
     replace: (data: string, mediaType: string) => replaceImage(ref, data, mediaType),
     drop: (note: string) => textify(ref, note),
   }));
-  // 固定单图编码，累计限制由上下文压缩处理，不能再次降低历史图片的画质。
-  await normalizeImageTargets(targets, { ...options, stablePerImage: true });
+  // Native Messages keeps its legacy tiers; Responses owns stable bytes and compaction.
+  const stablePerImage = options.stablePerImage !== false;
+  await normalizeImageTargets(targets, { ...options, stablePerImage, processLimit: stablePerImage ? Infinity : 100, overflowAction: "none" });
 }

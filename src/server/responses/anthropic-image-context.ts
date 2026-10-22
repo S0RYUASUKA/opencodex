@@ -50,6 +50,8 @@ export async function prepareAnthropicImageContext(input: {
 }): Promise<void> {
   const { parsed, adapter, incoming, summarize } = input;
   if (adapter.name !== "anthropic") return;
+  if (!parsed.context.messages.some(message => Array.isArray(message.content)
+    && message.content.some(part => part.type === "image"))) return;
   const signal = incoming.abortSignal;
   const checkAbort = () => { if (signal?.aborted) throw signal.reason ?? new DOMException("Aborted", "AbortError"); };
   const fits = async (messages: OcxMessage[], summary: boolean): Promise<boolean> => {
