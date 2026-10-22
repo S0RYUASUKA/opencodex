@@ -44,6 +44,9 @@ executes a tool or appends anything to client history. Diagnostic records correl
 ids with allowlisted thread/turn/role, phase, counters and fixed network reasons; they contain
 no prompt, image, credential or raw exception. `src/server/request-origin.ts` separately
 correlates natural request logs, keeping missing/conflicting provenance unknown.
+Responses ordinary and compact gateway requests explicitly retain legacy parent-only
+replay when no child id exists. Identified siblings still use their own ids. This compatibility
+exception does not bind a Codex own-thread identity or enable Anthropic renewal or image recovery.
 Terminal continuations select Anthropic SSE parsing from the actual response content type even
 for a non-stream client. Both initial and continuation 413 paths refuse unchanged image resends.
 

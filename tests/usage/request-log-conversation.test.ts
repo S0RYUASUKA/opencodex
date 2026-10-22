@@ -174,6 +174,13 @@ describe("reasoningReplayConversationIdFromResponsesRequest", () => {
     })).toBeUndefined();
   });
 
+  test("explicit legacy parent-only replay does not coalesce identified children", () => {
+    const legacy = { clientThreadId: "parent-thread", sessionIdHeader: "shared-session", allowParentThreadFallback: true };
+    expect(reasoningReplayConversationIdFromResponsesRequest(legacy)).toBe("parent-thread");
+    expect(reasoningReplayConversationIdFromResponsesRequest({ ...legacy, threadIdHeader: "child-a" })).toBe("child-a");
+    expect(reasoningReplayConversationIdFromResponsesRequest({ ...legacy, threadIdHeader: "child-b" })).toBe("child-b");
+  });
+
   test("skips empty, control-bearing, and overlong fallbacks", () => {
     expect(reasoningReplayConversationIdFromResponsesRequest({
       threadIdHeader: "  ",

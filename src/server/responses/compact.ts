@@ -1000,6 +1000,7 @@ export async function handleResponsesCompact(
       gatewayReplayParsed._clientThreadId = req.headers.get("x-codex-parent-thread-id")?.trim() || undefined;
       const clientThreadId = reasoningReplayConversationIdFromResponsesRequest({
         clientThreadId: gatewayReplayParsed._clientThreadId,
+        allowParentThreadFallback: true,
         threadIdHeader: req.headers.get("thread-id"),
         cursorConversationId: gatewayReplayParsed._cursorConversationId,
         sessionIdHeader: sessionIdHeaderFromRequest(req.headers),

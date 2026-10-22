@@ -589,6 +589,7 @@ export async function prepareResponsesRequest(
   if (!parsed._reasoningReplayScope) {
     const reasoningReplayConversationId = reasoningReplayConversationIdFromResponsesRequest({
       clientThreadId: parsed._clientThreadId,
+      allowParentThreadFallback: true,
       threadIdHeader: req.headers.get("thread-id"),
       cursorConversationId: parsed._cursorConversationId,
       sessionIdHeader: sessionIdHeaderFromRequest(req.headers),
