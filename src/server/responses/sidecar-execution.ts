@@ -94,7 +94,7 @@ export async function executeResponsesSidecars(
     | "noteRoutedAttemptSend"
     | "bindKeyUsageFromBridge"
   >,
-  sidecarState: Pick<ResponsesSidecarAuth, "routedCompaction" | "preserveCompactionPrefix" | "openAiSidecar">,
+  sidecarState: Pick<ResponsesSidecarAuth, "routedCompaction" | "openAiSidecar">,
   responseEffects: Pick<
     ResponsesEffects,
     | "commitReasoningReplayServingRoute"
@@ -126,7 +126,7 @@ export async function executeResponsesSidecars(
     rememberKiroDeliveredFinalAnswer,
     responseStateOptions,
   } = requestState;
-  const { routedCompaction, preserveCompactionPrefix, openAiSidecar } = sidecarState;
+  const { routedCompaction, openAiSidecar } = sidecarState;
   const { reserveCredentialHop } = sendBudgetState;
   const sidecarBudget = createSidecarSendBudget(options, sendBudgetState, () => logCtx.usageLogInputTokens);
   const recoverImageContext = prepareImageContext ? (response: Response, attempt: OcxParsedRequest, adapter: ProviderAdapter, signal: AbortSignal) =>
@@ -195,45 +195,39 @@ export async function executeResponsesSidecars(
     parsed.context.systemPrompt = options.imageSummaryContext.systemPrompt;
     return undefined;
   }
-  let advisorPlan: Awaited<ReturnType<typeof createRegisteredAdvisorPlan>>;
-  let wsPlan: ReturnType<typeof planWebSearch>;
-  let imgPlan: Awaited<ReturnType<typeof planImageBridge>>;
-  let vidPlan: Awaited<ReturnType<typeof planVideoBridge>>;
-  try {
-    advisorPlan = options.advisorInternal === true
-      ? null
-      : await createRegisteredAdvisorPlan({
-        config,
-        workerIdentity: `${route.modelId} (provider ${route.providerName})`,
-        workerModelId: route.modelId,
-        abortSignal: options.abortSignal,
-      });
-    if (advisorPlan && !routedCompaction) await advisorPlan.preflightInject(parsed);
-    if (!routedCompaction || preserveCompactionPrefix) {
-      wsPlan = planWebSearch(config, parsed, false, route.provider, route.modelId, openAiSidecar, {
-        admission: options.admission, codexAuthPolicy: options.codexAuthPolicy, providerName: route.providerName,
-      });
-      imgPlan = await planImageBridge(config, parsed, route.provider);
-      // Replayed search pairs require the synthetic tool declared by the search sidecar.
-      if (!wsPlan) stripReplayedSearchPairs(parsed);
-      vidPlan = await planVideoBridge(config, parsed, route.provider);
-      const surface: SidecarToolSurface = wsPlan
-        ? transportState.adapter.runTurn ? { kind: "none" } : { kind: "web-search" }
-        : (imgPlan || vidPlan) && (parsed.stream || preserveCompactionPrefix)
-          ? { kind: "media", image: imgPlan, video: vidPlan }
-          : advisorPlan && !transportState.adapter.runTurn && !imgPlan && !vidPlan
-            ? { kind: "advisor", tool: advisorPlan.tool }
-            : { kind: "none" };
-      applySidecarToolSurface(parsed, surface);
+  if (routedCompaction) {
+    stripReplayedSearchPairs(parsed);
+    try {
+      return await prepareImageContext?.();
+    } finally {
+      releaseSearchProbeLease();
     }
-  } finally {
-    if (routedCompaction) releaseSearchProbeLease();
   }
+  const advisorPlan = options.advisorInternal === true ? null : await createRegisteredAdvisorPlan({
+    config,
+    workerIdentity: `${route.modelId} (provider ${route.providerName})`,
+    workerModelId: route.modelId,
+    abortSignal: options.abortSignal,
+  });
+  if (advisorPlan) await advisorPlan.preflightInject(parsed);
+  const wsPlan = planWebSearch(config, parsed, false, route.provider, route.modelId, openAiSidecar, {
+    admission: options.admission, codexAuthPolicy: options.codexAuthPolicy, providerName: route.providerName,
+  });
+  const imgPlan = await planImageBridge(config, parsed, route.provider);
+  if (!wsPlan) stripReplayedSearchPairs(parsed);
+  const vidPlan = await planVideoBridge(config, parsed, route.provider);
+  const surface: SidecarToolSurface = wsPlan
+    ? transportState.adapter.runTurn ? { kind: "none" } : { kind: "web-search" }
+    : (imgPlan || vidPlan) && parsed.stream
+      ? { kind: "media", image: imgPlan, video: vidPlan }
+      : advisorPlan && !transportState.adapter.runTurn && !imgPlan && !vidPlan
+        ? { kind: "advisor", tool: advisorPlan.tool }
+        : { kind: "none" };
+  applySidecarToolSurface(parsed, surface);
   try {
     const refusal = await prepareImageContext?.();
     if (refusal) { releaseSearchProbeLease(); return refusal; }
   } catch (error) { releaseSearchProbeLease(); throw error; }
-  if (routedCompaction) return undefined;
   const canRunWebSearch = !!wsPlan && !transportState.adapter.runTurn;
   let sidecarOutputStarted = false;
   const sidecarHasCommittedOutput = () => sidecarOutputStarted
@@ -568,6 +562,7 @@ export async function executeResponsesSidecars(
         return fetch.unpacedFetch ?? fetch;
       },
       onRequestBuilt: request => {
+        if (typeof request.usageLog?.inputTokens === "number") logCtx.usageLogInputTokens = request.usageLog.inputTokens;
         recordAdapterReasoning(logCtx, request);
         recordAdapterTier(logCtx, request);
       },
@@ -681,6 +676,7 @@ export async function executeResponsesSidecars(
       abortSignal: options.abortSignal,
       onFirstOutput: noteSidecarOutput,
       onRequestBuilt: request => {
+        if (typeof request.usageLog?.inputTokens === "number") logCtx.usageLogInputTokens = request.usageLog.inputTokens;
         recordAdapterReasoning(logCtx, request);
         recordAdapterTier(logCtx, request);
       },

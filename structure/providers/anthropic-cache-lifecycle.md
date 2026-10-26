@@ -75,12 +75,14 @@ indivisible unit without compactable old images does not start another summary. 
 budgets, cancellation and serving-owner checks remain authoritative.
 
 `src/server/responses/image-context-recovery.ts` dispatches the summary inside the original
-Responses owner. `src/server/responses/response-effects.ts` preserves Anthropic tools, system
-and normal tool choice. `src/responses/compaction-summary.ts` suppresses client tool events
-and rejects invalid summaries before checkpoint publication, including EOF without a normal stop
-reason. Successful summaries have no failure error code. Sidecar execution is bypassed.
-Hosted server tools are the exception: `tool_choice: none` prevents upstream execution, at
-the documented cost of invalidating the Messages cache when choice changes.
+Responses owner and uses the existing [routed compaction contract](../transports/responses-failover.md#compaction-routing-overrides).
+`src/server/responses/response-effects.ts` keeps the caller's choice while the adapter builds the
+tools and system prefix. Hosted or mandatory choices prohibit execution only at the final wire
+choice. `src/responses/compaction-summary.ts` rejects tool events and invalid summaries before
+checkpoint publication; a normal completion may omit its stop reason. Sidecar execution is bypassed.
+Changing the final `tool_choice` invalidates the Messages cache, not the tools/system prefix.
+The normal sidecar tool surface is finalized before image recovery captures its summary context;
+routed compaction keeps the upstream sidecar bypass instead of injecting extra synthetic tools.
 
 Successful summaries use the existing bounded response-state store, bound to principal, own
 thread and serving owner. A digest identifies the exact timestamp-free historical prefix

@@ -1,5 +1,7 @@
 import { test, expect } from "bun:test";
 import { repoRoot } from "../helpers/repo-root";
+import { createAnthropicAdapter } from "../../src/adapters/anthropic";
+import { withTestTranslatorBudget } from "../helpers/translator-budget";
 const root = repoRoot();
 const cache = await import(`${root}/src/anthropic/cache-renewal.ts`);
 const { createResponsesEffects } = await import(`${root}/src/server/responses/response-effects.ts`);
@@ -132,29 +134,35 @@ test("compaction preserves client tool and system cache prefixes without changin
   expect(parsed.context.messages.at(-1).content).toContain("Do not call tools");
 });
 
-test("compaction explicitly prohibits hosted server tools while retaining their declarations", () => {
+test("compaction explicitly prohibits hosted server tools while retaining their declarations", async () => {
   const parsed: any = { options: { toolChoice: "auto" }, context: { tools: [], messages: [] },
     _anthropicServerTools: [{ type: "web_search_20250305", name: "web_search" }] };
   createResponsesEffects({ options: {}, req: new Request("http://localhost/v1/responses"), config: {} } as any,
     {} as any, { parsed, route: { provider: { adapter: "anthropic" } } } as any,
     { routedCompaction: true, preserveCompactionPrefix: true });
-  expect(parsed.options.toolChoice).toBe("none");
+  expect(parsed.options.toolChoice).toBe("auto");
   expect(parsed._anthropicServerTools).toHaveLength(1);
+  parsed.modelId = "claude-sonnet-4-6";
+  parsed.context.messages.unshift({ role: "user", content: "earlier turn", timestamp: 1 });
+  const adapter = withTestTranslatorBudget(createAnthropicAdapter({ adapter: "anthropic", baseUrl: "https://api.anthropic.com", authMode: "key", apiKey: "synthetic-test-key" }, "short"));
+  const wire = JSON.parse((await adapter.buildRequest(parsed)).body as string);
+  expect(wire.tools).toContainEqual(expect.objectContaining({ type: "web_search_20250305", name: "web_search" }));
+  expect(wire.tool_choice).toEqual({ type: "none" });
 });
 
-for (const kind of ["text", "tool", "empty", "abnormal", "eof"] as const) {
+for (const kind of ["text", "tool", "empty", "abnormal", "missing-stop"] as const) {
   test(`summary guard admits only a normally completed tool-free summary: ${kind}`, async () => {
     const budget = createTranslatorBudget();
     async function* events(): AsyncGenerator<any> {
       if (kind === "tool") yield { type: "tool_call_start", id: "synthetic-call", name: "read" };
       if (kind !== "empty") yield { type: "text_delta", text: "summary" };
-      yield { type: "done", stopReason: kind === "eof" ? undefined : kind === "abnormal" ? "unexpected_stop" : "end_turn", endTurn: true };
+      yield { type: "done", stopReason: kind === "missing-stop" ? undefined : kind === "abnormal" ? "unexpected_stop" : "end_turn", endTurn: true };
     }
     try {
       const output = [];
       for await (const event of guardCompactionSummary(events(), budget)) output.push(event);
       expect(output.some(event => event.type === "tool_call_start")).toBe(false);
-      if (kind === "text") expect(output.at(-1)?.type).toBe("done");
+      if (kind === "text" || kind === "missing-stop") expect(output.at(-1)?.type).toBe("done");
       else expect(output.at(-1)).toMatchObject({ type: "error", code: "compaction_invalid_summary" });
     } finally { budget.dispose(); }
   });

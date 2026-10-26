@@ -1,3 +1,4 @@
+import { requiresToolCall } from "../../types";
 import type { ResponsesRequestContext, ResponsesAdmissionState } from "./core-options";
 import type { PreparedResponsesRequest } from "./request-prepare";
 import type { ResponsesSidecarAuth } from "./request-sidecar-auth";
@@ -10,7 +11,7 @@ import { isCanonicalOpenAiForwardProvider } from "../../providers/openai-tiers";
 import { contextRelayActivated } from "../../codex/context-compat";
 import { recordContextSessionOwner } from "../../codex/context-owner";
 import { resolveContextPrincipal } from "../auth-cors";
-import { COMPACT_PROMPT, CHECKPOINT_CONTINUATION_NOTE, decodeCompactionSummary, isCompactionItemType } from "../../responses/compaction";
+import { COMPACT_PROMPT } from "../../responses/compaction";
 import type { RoutedNamespaceToolAliases } from "../../responses/namespace-tool-compat";
 import type { MuseToolNameAliases } from "../../responses/muse-tool-name-alias";
 import type { AdapterRequest } from "../../adapters/base";
@@ -26,11 +27,11 @@ export function createResponsesEffects(
     | "route"
     | "substituteMainCredential"
   >,
-  sidecarState: Pick<ResponsesSidecarAuth, "routedCompaction" | "preserveCompactionPrefix">,
+  sidecarState: Pick<ResponsesSidecarAuth, "routedCompaction"> & Partial<Pick<ResponsesSidecarAuth, "preserveCompactionPrefix">>,
 ) {
   const { options, req, config } = requestContext;
   const { parsed, poolAffinityKey, route, substituteMainCredential } = requestState;
-  const { routedCompaction, preserveCompactionPrefix: preservePrefix } = sidecarState;
+  const { routedCompaction, preserveCompactionPrefix } = sidecarState;
 
 
   const recordTerminalOutcomes = options.recordTerminalOutcomes !== false;
@@ -67,8 +68,8 @@ export function createResponsesEffects(
 
   // Remote compaction v2 on a ROUTED model: Codex sent `compaction_trigger` and requires exactly
   // one `{type:"compaction"}` output item (codex-rs compact_remote_v2.rs). Passthrough handles it
-  // natively upstream; here the routed model writes a summary, with no sidecar execution.
-  // The bridge appends the synthetic compaction item (src/responses/compaction.ts).
+  // natively upstream; here the routed model summarizes without sidecar execution, and the
+  // bridge appends the synthetic compaction item (src/responses/compaction.ts).
   // A Responses-shaped wire does not imply support for Codex's private
   // `compaction_trigger` item — only the canonical ChatGPT backend speaks that
   // contract. An API-key gateway would receive the trigger, answer with an ordinary
@@ -87,27 +88,21 @@ export function createResponsesEffects(
     }
   };
   if (routedCompaction) {
-    if (!preservePrefix) {
+    delete parsed._webSearch;
+    if (!preserveCompactionPrefix) {
       delete parsed.context.tools;
-      delete parsed.options.toolChoice;
-      delete parsed.options.parallelToolCalls;
-      delete parsed._webSearch;
       delete parsed._anthropicServerTools;
       delete parsed._anthropicServerReplay;
+      delete parsed.options.toolChoice;
+      delete parsed.options.parallelToolCalls;
+    } else if (parsed._anthropicServerTools?.length || requiresToolCall(parsed.options.toolChoice)) {
+      // Hosted tools execute upstream, and a mandatory choice would force a call the summary
+      // guard must reject. Keep the choice itself so the adapter derives the same tools and
+      // system bytes; the adapter replaces only the final wire tool_choice with "none".
+      // tool_choice changes invalidate message cache, not tools/system (Anthropic caching docs).
+      parsed._summaryProhibitsToolCalls = true;
     }
-    // Client tools are blocked by the summary guard without changing the cache options.
-    // Hosted tools execute upstream, so these declarations require an explicit prohibition.
-    if (preservePrefix && parsed._anthropicServerTools?.length) parsed.options.toolChoice = "none";
-    const input = (parsed._rawBody as { input?: unknown } | undefined)?.input;
-    if (preservePrefix && Array.isArray(input)
-      && input.some((item: unknown) => {
-        if (!item || typeof item !== "object") return false;
-        const checkpoint = item as { type?: unknown; encrypted_content?: unknown };
-        return isCompactionItemType(checkpoint.type) && typeof checkpoint.encrypted_content === "string"
-          && decodeCompactionSummary(checkpoint.encrypted_content) !== null;
-      })) {
-      (parsed.context.systemPrompt ??= []).push(CHECKPOINT_CONTINUATION_NOTE);
-    }
+    // Client tool events are rejected by guardCompactionSummary before reaching Codex.
     // The compaction turn is a plain prose summary; a surviving structured-output format
     // would force schema-constrained JSON into the synthetic compaction item. The flag and
     // the raw `text` control go too: the key-mode openai-responses adapter builds from
@@ -120,7 +115,7 @@ export function createResponsesEffects(
     }
     parsed.context.messages = [
       ...parsed.context.messages,
-      { role: "user", content: preservePrefix
+      { role: "user", content: preserveCompactionPrefix
         ? `${COMPACT_PROMPT}\n\nReturn only the handoff summary. Do not call tools or continue the task.`
         : COMPACT_PROMPT, timestamp: Date.now() },
     ];

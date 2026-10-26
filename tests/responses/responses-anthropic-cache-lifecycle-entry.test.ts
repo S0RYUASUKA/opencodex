@@ -275,7 +275,8 @@ for (const role of ["main", "child"]) for (const entry of ["http", "ws", "compac
     const text = await response.text(); expect(response.ok).toBe(true); expect(text.length).toBeGreaterThan(0);
     expect(response.headers.get("content-type")).toContain(entry.startsWith("compact") ? "application/json" : "text/event-stream");
     if (entry.startsWith("compact")) expect(() => JSON.parse(text)).not.toThrow();
-    expect(sent[0].body.tools.some((tool: any) => tool.name === "web_search")).toBe(true);
+    expect(sent[0].body.tools.some((tool: any) => tool.name === "web_search")).toBe(!entry.startsWith("compact"));
+    expect(sent[0].body.tools.some((tool: any) => tool.name === "custom_fixture_tool")).toBe(true);
     expect(sent).toHaveLength(1); expect(sent[0].body.stream).toBe(true); expect(listeners.has(own)).toBe(true);
     await clock.advance(270000);
     expect(sent).toHaveLength(2); expect(sent[1].body).toEqual({ ...sent[0].body, max_tokens: 0, stream: false });

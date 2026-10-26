@@ -2,6 +2,7 @@ import type { AdapterEvent } from "../types";
 import { releaseTranslatedEvent, type TranslatorBudget } from "../lib/translator-budget";
 import { isTruncatedStopReason } from "./truncated-stop-reason";
 
+/** Keep client/hosted tool events out of a routed Anthropic summary's compaction item. */
 export async function* guardCompactionSummary(
   events: AsyncIterable<AdapterEvent>,
   budget: TranslatorBudget,
@@ -9,7 +10,7 @@ export async function* guardCompactionSummary(
   let hasText = false;
   let attemptedTool = false;
   for await (const event of events) {
-    if (event.type === "text_delta") {
+    if (event.type === "text_delta" && !event.anthropicThinkingSignature) {
       hasText ||= event.text.trim().length > 0;
       yield event;
       continue;
@@ -20,8 +21,10 @@ export async function* guardCompactionSummary(
     }
     if (event.type === "done") {
       if (!isTruncatedStopReason(event.stopReason)
-        && (attemptedTool || !hasText || event.endTurn === false
-          || (event.stopReason !== "end_turn" && event.stopReason !== "stop_sequence"))) {
+        // An absent stop reason is accepted, as on every other completion path: some
+        // Anthropic-compatible endpoints omit it. An explicit non-terminal reason is not.
+        && (attemptedTool || !hasText
+          || (event.stopReason !== undefined && event.stopReason !== "end_turn" && event.stopReason !== "stop_sequence"))) {
         releaseTranslatedEvent(event, budget);
         yield {
           type: "error", status: 502, errorType: "upstream_error",
