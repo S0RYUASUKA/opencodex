@@ -65,7 +65,8 @@ export function createImageContextPreparation(
             const response = await dispatchers.handleResponses(child, config, childLog, {
               translatorBudget: options.translatorBudget, sendBudget: options.sendBudget,
               abortSignal: options.abortSignal, turnAdmissionLease: options.turnAdmissionLease,
-              admission: options.admission, openAiSidecarAuth: options.openAiSidecarAuth,
+              admission: options.admission, admissionScope: requestState.admissionScope ?? { providers: [], models: [] },
+              openAiSidecarAuth: options.openAiSidecarAuth,
               nativeCallerAuth: options.nativeCallerAuth, callerDirectAuth: options.callerDirectAuth,
               internalDecisionCall: true, imageSummaryContext: context, recordTerminalOutcomes: false,
               compactionRecoveryAttempted: true, inboundTransport: options.inboundTransport,

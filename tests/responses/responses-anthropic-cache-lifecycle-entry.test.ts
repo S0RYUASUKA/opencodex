@@ -207,6 +207,34 @@ test("a spend ceiling added after confirmation stops subsequent renewal", async 
   expect(sent).toHaveLength(1);
 });
 
+for (const scope of ["allowed", "unrestricted", "denied"]) test(`image summaries retain captured caller admission: ${scope}`, async () => {
+  const cfg = config(); cfg.anthropicCacheRenewal = false; cfg.webSearchSidecar.enabled = false;
+  cfg.apiKeys = [{ id: "image-caller", name: "fixture", key: "ocx_data_" + "c".repeat(40),
+    createdAt: "2026-01-01T00:00:00.000Z", allowedProviders: scope === "denied" ? ["anthropic"] : ["other"], allowedModels: [] }];
+  const r = request("main", "http", false), raw = await r.req.json() as any;
+  const headers = new Headers(r.req.headers), own = randomUUID();
+  headers.set("thread-id", own); raw.client_metadata.thread_id = own;
+  const image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aHe8AAAAASUVORK5CYII=";
+  raw.input = Array.from({ length: 101 }, (_, i) => ({ role: "user", content: [
+    { type: "input_text", text: `Image ${i}` }, { type: "input_image", image_url: image },
+  ] }));
+  const response = await handleResponses(new Request(r.req.url, {
+    method: "POST", headers, body: JSON.stringify(raw),
+  }), cfg, { model: "", provider: "" } as any, {
+    ...r.options, admission: { kind: "configured", keyId: "image-caller", source: "bearer" },
+    admissionScope: { providers: scope === "unrestricted" ? [] : [scope === "allowed" ? "anthropic" : "other"], models: [] },
+  });
+  const text = await response.text();
+  if (scope === "denied") {
+    expect(response.status).toBe(403); expect(text).toContain("model_not_allowed_for_key"); expect(sent).toHaveLength(0);
+  } else {
+    expect(response.status).toBe(200); expect(JSON.parse(text).status).toBe("completed");
+    expect(sent.some(item => JSON.stringify(item.body.messages.at(-1)).includes("CONTEXT CHECKPOINT COMPACTION"))).toBe(true);
+    expect(JSON.stringify(sent.at(-1).body.messages)).toContain("Image 100");
+  }
+  expect(denied).toBe(0);
+});
+
 for (const enabled of [false, true]) test(`image-count pressure preserves prefixes and latest tool pair independently of renewal: enabled=${enabled}`, async () => {
   const beforeLogs = new Set(getRequestLogEntries().map(row => row.requestId));
   const cfg = config(); cfg.anthropicCacheRenewal = enabled;

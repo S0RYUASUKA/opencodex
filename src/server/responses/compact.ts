@@ -1,6 +1,7 @@
 import { captureAccountAutoPauseAttempt, wasAccountAutoPaused, wasPermanentAccountRefusal } from "../../oauth/account-auto-pause";
 import { spendLedgerStorageErrorResponse } from "./spend-storage-error";
 import { createPhysicalSendReporter, rebindPhysicalSend } from "../../lib/request-execution-budget";
+import { hasResponseMediaType } from "../../lib/http-response-semantics";
 import { createInferenceSendBudget } from "../inference/context";
 import { unboundPoolSpendRefusalResponse } from "../workflow-refusal";
 import { capturePoolQuotaWriter } from "../../codex/account-store";
@@ -80,6 +81,7 @@ import {
 } from "../../codex/auth-context";
 import {
   forceRefreshMainAccountToken,
+  mainAccountTokenQuotaWriter,
   type NativeMainRefreshDependencies,
 } from "../../codex/main-account";
 import {
@@ -372,6 +374,7 @@ async function refreshNativeMainCompactContext(args: {
       ...authCtx,
       accessToken: refreshed.accessToken,
       chatgptAccountId: refreshed.chatgptAccountId,
+      mainQuotaWriter: mainAccountTokenQuotaWriter(refreshed) ?? authCtx.mainQuotaWriter,
     };
     const refreshedProvider = applyCodexAuthContextToProvider(
       stripCodexRuntimeProviderFields(provider),
@@ -1741,7 +1744,7 @@ export async function handleResponsesCompact(
     }
     if (!response.ok) return response;
     let json: { output?: unknown[]; status?: unknown; error?: unknown };
-    if (response.headers.get("content-type")?.includes("text/event-stream")) {
+    if (hasResponseMediaType(response.headers, "text/event-stream")) {
       if (!response.body) {
         return formatErrorResponse(502, "server_error", "compaction turn returned an empty event stream");
       }

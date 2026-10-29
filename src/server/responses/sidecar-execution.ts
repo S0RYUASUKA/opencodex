@@ -72,6 +72,7 @@ export async function executeResponsesSidecars(
     | "toolBridgeMaps"
     | "rememberKiroDeliveredFinalAnswer"
     | "responseStateOptions"
+    | "admissionScope"
   >,
   transportState: Pick<
     ResponsesTransport,
@@ -125,6 +126,7 @@ export async function executeResponsesSidecars(
     translatorBudget,
     rememberKiroDeliveredFinalAnswer,
     responseStateOptions,
+    admissionScope,
   } = requestState;
   const { routedCompaction, openAiSidecar } = sidecarState;
   const { reserveCredentialHop } = sendBudgetState;
@@ -207,6 +209,7 @@ export async function executeResponsesSidecars(
     config,
     workerIdentity: `${route.modelId} (provider ${route.providerName})`,
     workerModelId: route.modelId,
+    admissionScope,
     abortSignal: options.abortSignal,
   });
   if (advisorPlan) await advisorPlan.preflightInject(parsed);
@@ -532,6 +535,7 @@ export async function executeResponsesSidecars(
     const imgLoopResponse = await runWithImageBridge({
       recoverImageContext,
       parsed, adapter: transportState.adapter,
+      chatRawReasoningVisible: options.chatRawReasoningVisible,
       ...(transportState.adapter.name === "anthropic" ? { thinkingRecovery } : {}),
       clientToolCatalogRestriction: route.provider.authMode === "forward" ? undefined : requestState.clientToolCatalogRestriction,
       incomingMeta: { headers: requestState.selectedForwardHeaders, providerName: route.providerName, abortSignal: options.abortSignal, translatorBudget, ...(options.comboInitialSend ? { providerFetch: imageProviderFetch } : {}), ...sidecarBudget.incomingMeta },
@@ -639,6 +643,7 @@ export async function executeResponsesSidecars(
     const loopResponse = await runWithWebSearch({
       recoverImageContext,
       parsed, adapter: transportState.adapter,
+      chatRawReasoningVisible: options.chatRawReasoningVisible,
       ...(transportState.adapter.name === "anthropic" ? { thinkingRecovery } : {}),
       clientToolCatalogRestriction: route.provider.authMode === "forward" ? undefined : requestState.clientToolCatalogRestriction,
       onIterationEnd: sidecarBudget.releaseUnsentHop,

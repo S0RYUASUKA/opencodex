@@ -76,6 +76,7 @@ budgets, cancellation and serving-owner checks remain authoritative.
 
 `src/server/responses/image-context-recovery.ts` dispatches the summary inside the original
 Responses owner and uses the existing [routed compaction contract](../transports/responses-failover.md#compaction-routing-overrides).
+The summary inherits the parent's captured admission scope, including an explicit unrestricted scope, instead of resolving a changed key configuration again.
 `src/server/responses/response-effects.ts` keeps the caller's choice while the adapter builds the
 tools and system prefix. Hosted or mandatory choices prohibit execution only at the final wire
 choice. `src/responses/compaction-summary.ts` rejects tool events and invalid summaries before

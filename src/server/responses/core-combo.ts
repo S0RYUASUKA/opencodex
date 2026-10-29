@@ -114,6 +114,7 @@ import {
   markEagerRelaySseResponse,
 } from "../relay";
 import { preflightComboStreamResponse } from "./combo-stream-preflight";
+import { requiredToolContractOf } from "./combo-required-tool-contract";
 import { streamingContextOverflowResponse, jsonContextOverflowResponse, lateAttributionLimitResponse } from "./context-overflow";
 import { mandatoryResponsesReasoningReplayUnavailable } from "./core-replay";
 import { settleOperatorReplacement } from "../../lib/upstream-retry";
@@ -393,6 +394,10 @@ export async function executeComboResponses(
   // result after its provisional Authorization is removed, including an explicitly keyless result.
   const replayPrincipal = options.replayPrincipal
     ?? { clientPrincipalId: resolveContextPrincipal(req, config, options.admission) };
+  // The caller's model scope, resolved once from the request options. A capability-authenticated
+  // internal request carries the caller's captured scope on options.admissionScope even though
+  // its own admission is the host's broad key; recomputing from options.admission would lose it.
+  const admissionScope = options.admissionScope ?? resolveAdmissionModelScope(config, options.admission);
   // PF-07: present only for a Chat combo with `nativeChatCombos` on; otherwise every child
   // takes the bridge below exactly as before.
   const protocolLanes = createComboProtocolLanes({
@@ -400,7 +405,7 @@ export async function executeComboResponses(
     req,
     config,
     logCtx,
-    admission: options.admission,
+    admissionScope,
     droidDefaultEffort: options.droidDefaultEffort,
     comboId,
     targets: combo.targets,
@@ -707,7 +712,7 @@ export async function executeComboResponses(
         fallback,
         config,
         isDestinationAllowed: (providerName, modelId) => routeAllowedByScope(
-          resolveAdmissionModelScope(config, options.admission), { providerName, modelId },
+          admissionScope, { providerName, modelId },
         ),
         ...(combo.decisionQuotaSignals === true ? { decisionQuotaSignals: true, decisionQuotaTiers: combo.decisionQuotaTiers } : {}),
         ...(combo.decisionProvider ? { decisionProvider: combo.decisionProvider } : {}),
@@ -717,7 +722,7 @@ export async function executeComboResponses(
             invokeModel: createJevModelInvoker({
               req,
               config,
-              options,
+              options: { ...options, admissionScope },
               handleResponses: requestDispatchers.handleResponses,
             }),
           }
@@ -1171,7 +1176,10 @@ export async function executeComboResponses(
       const eagerRelay = isEagerRelaySseResponse(response);
       let preflight;
       try {
-        preflight = await preflightComboStreamResponse(response, childLog);
+        preflight = await preflightComboStreamResponse(response, childLog, undefined, {
+          signal: options.abortSignal,
+          requiredToolPrelude: childLog.providerAdapter === "openai-responses" && requiredToolContractOf(rawBody) !== undefined,
+        });
       } catch (error) {
         callbackGate.discard();
         if (options.abortSignal?.aborted) {
@@ -1192,6 +1200,13 @@ export async function executeComboResponses(
         if (nativePassthrough) markNativePassthroughSseResponse(response);
         if (eagerRelay) markEagerRelaySseResponse(response);
       }
+    }
+
+    if (options.abortSignal?.aborted) {
+      callbackGate.discard();
+      await response.body?.cancel().catch(() => undefined);
+      retainCancelledAttempt();
+      return clientCancelledResponse();
     }
 
     if (response.ok) {

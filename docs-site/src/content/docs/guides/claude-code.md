@@ -109,7 +109,7 @@ Operational contract when enabled:
   not postpone usage probes or clear a failed usage probe's unavailable status. Measurements
   whose known reset time has passed are discarded as unknown, including retained model-specific
   windows. Values without a known reset are preserved; missing data is never reported as zero usage.
-- Affinity is **process-local** (lost on proxy restart).
+- Affinity survives proxy restart within the same config home and provider instance (24-hour idle lifetime, newest 2,000 bindings). The private snapshot stores session digests and login fences, never raw session keys or tokens. Legacy accounts without a persistent login identity remain process-local until their next login. Token refresh preserves affinity; replacement login, account removal, pause/reauthentication and explicit runtime account selection invalidate it. A transient throttle detour preserves the original binding even when its pause expires before the retry commits.
 - A complete, structured **403** account-entitlement or billing refusal can rotate before
   output. Recognized cases include no Claude Code access, an expired/inactive subscription,
   and an insufficient Anthropic credit balance. The refused account loses its affinities and
@@ -680,6 +680,10 @@ Models with a long context window (1M, or at least the 829,800-token default com
 Claude models on an Anthropic route need a genuine 1M) get an extra `…[1m]` picker row: selecting it makes
 Claude Code account a full 1M context for that model (auto-compaction stays on) — the proxy strips
 the marker before routing.
+Fast-eligible native OpenAI models also get a `…--fast[1m]` row labelled `· Fast · 1M`
+when they meet the same long-context rule. This combines the native Fast tier with Claude
+Code's long-context accounting; it does not raise the upstream input limit. The row keeps
+the native model's input ceiling and the existing auto-compaction policy.
 Selecting one persists it to Claude Code's `settings.json` `model` field; inbound requests resolve
 the alias back to the routed model. On older Claude Code versions the picker stays native — set
 slots via
